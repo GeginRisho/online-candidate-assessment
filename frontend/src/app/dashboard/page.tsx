@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 import {
   LogOut,
   User,
@@ -22,8 +23,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/components/providers/auth-provider';
 import { fetchExams, fetchMySessions, startExamSession } from '@/services';
 
-export default function CandidateDashboardPage() {
+function CandidateDashboardContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const autoExamId = searchParams.get('examId');
   const queryClient = useQueryClient();
   const { user, isLoading, isAuthenticated, logout } = useAuth();
 
@@ -58,6 +61,28 @@ export default function CandidateDashboardPage() {
       });
     },
   });
+
+  React.useEffect(() => {
+    if (
+      autoExamId &&
+      isAuthenticated &&
+      user?.userType === 'CANDIDATE' &&
+      exams.length > 0 &&
+      !isLoadingExams &&
+      !isLoadingSessions
+    ) {
+      const existingSession = sessions.find((s) => s.examId === autoExamId);
+      if (existingSession) {
+        const isCompleted = existingSession.status === 'SUBMITTED' || existingSession.status === 'AUTO_SUBMITTED';
+        const isDisqualified = existingSession.status === 'DISQUALIFIED';
+        if (!isCompleted && !isDisqualified) {
+          router.replace(`/exam/${existingSession.id}/system-check`);
+        }
+      } else {
+        startSessionMutation.mutate(autoExamId);
+      }
+    }
+  }, [autoExamId, isAuthenticated, user, exams, sessions, isLoadingExams, isLoadingSessions, router, startSessionMutation]);
 
   const handleLogout = async () => {
     try {
@@ -286,3 +311,18 @@ export default function CandidateDashboardPage() {
     </div>
   );
 }
+
+export default function CandidateDashboardPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50">
+          <Loader2 className="size-8 animate-spin text-blue-600" />
+        </div>
+      }
+    >
+      <CandidateDashboardContent />
+    </React.Suspense>
+  );
+}
+

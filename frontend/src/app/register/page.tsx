@@ -57,11 +57,24 @@ function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qrRef = searchParams.get('ref') ?? undefined;
+  const examId = searchParams.get('examId') ?? undefined;
 
-  const { setUser } = useAuth();
+  const { user, isAuthenticated, isLoading: isAuthLoading, setUser } = useAuth();
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  // Auto redirect if already authenticated
+  React.useEffect(() => {
+    if (!isAuthLoading && isAuthenticated && user) {
+      if (user.userType === 'ADMIN') {
+        router.replace('/admin/dashboard');
+      } else {
+        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
+        router.replace(dest);
+      }
+    }
+  }, [isAuthenticated, user, isAuthLoading, examId, router]);
 
   const form = useForm<StudentFormValues>({
     resolver: zodResolver(studentSchema),
@@ -93,7 +106,8 @@ function RegisterContent() {
       toast.success('Registration successful!', {
         description: `Your candidate code is ${candidate.candidateCode}.`,
       });
-      router.push('/candidate/dashboard');
+      const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
+      router.push(dest);
     } catch (error) {
       toast.error('Registration failed', {
         description: getApiErrorMessage(error),
@@ -115,7 +129,7 @@ function RegisterContent() {
             <span>AssessPlatform</span>
           </Link>
           <div className="flex items-center gap-4">
-            <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-slate-900">
+            <Link href={examId ? `/login?examId=${examId}` : '/login'} className="text-sm font-medium text-slate-600 hover:text-slate-900">
               Already have an account? Sign in
             </Link>
           </div>
@@ -297,7 +311,7 @@ function RegisterContent() {
           <p className="mt-6 text-center text-sm text-slate-500">
             Already have an account?{' '}
             <Link
-              href="/login"
+              href={examId ? `/login?examId=${examId}` : '/login'}
               className="font-medium text-blue-600 hover:underline"
             >
               Sign in

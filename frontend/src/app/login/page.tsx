@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -33,10 +33,25 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 function LoginContent() {
   const router = useRouter();
-  const { setUser } = useAuth();
+  const searchParams = useSearchParams();
+  const examId = searchParams.get('examId');
+  const { user, isAuthenticated, isLoading: isAuthLoading, setUser } = useAuth();
+  
   const [showPassword, setShowPassword] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [rememberMe, setRememberMe] = React.useState(false);
+
+  // Auto redirect if already authenticated
+  React.useEffect(() => {
+    if (!isAuthLoading && isAuthenticated && user) {
+      if (user.userType === 'ADMIN') {
+        router.replace('/admin/dashboard');
+      } else {
+        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
+        router.replace(dest);
+      }
+    }
+  }, [isAuthenticated, user, isAuthLoading, examId, router]);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -46,20 +61,20 @@ function LoginContent() {
   async function onSubmit(values: LoginFormValues) {
     setIsSubmitting(true);
     try {
-      // 1. Try to login as candidate first
+      // 1. Try Candidate login
       try {
         const candidate = await candidateLogin(values);
         setUser({ ...candidate, userType: 'CANDIDATE' });
         toast.success(`Welcome back, ${candidate.fullName.split(' ')[0]}`);
-        router.push('/candidate/dashboard');
+        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
+        router.push(dest);
         return;
       } catch (candidateError: any) {
-        // If it's a validation error or something structural, propagate it
         if (candidateError.response?.status === 400 || candidateError.response?.status === 422) {
           throw candidateError;
         }
 
-        // 2. Otherwise try to login as admin
+        // 2. Try Admin login
         const admin = await adminLogin(values);
         setUser({ ...admin, userType: 'ADMIN' });
         toast.success(`Welcome back, ${admin.fullName.split(' ')[0]}`);
@@ -205,7 +220,7 @@ function LoginContent() {
           <p className="mt-6 text-center text-sm text-slate-500">
             Don&apos;t have an account?{' '}
             <Link
-              href="/register"
+              href={examId ? `/register?examId=${examId}` : '/register'}
               className="font-medium text-blue-600 hover:underline"
             >
               Register
