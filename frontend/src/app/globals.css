@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design system — Premium Light Theme
+  White backgrounds, blue primary, light gray cards, soft shadows.
+*/
+
+@layer base {
+  :root {
+    --background: 220 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 93%;
+    --secondary-foreground: 222 47% 20%;
+
+    --muted: 220 14% 93%;
+    --muted-foreground: 222 15% 46%;
+
+    --accent: 221 91% 96%;
+    --accent-foreground: 221 83% 40%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning: 38 96% 50%;
+    --warning-foreground: 26 60% 15%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 220 13% 88%;
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
+
+    --radius: 0.625rem;
+
+    --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  .font-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Card with consistent premium shadow */
+  .card-shadow {
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.06);
+  }
+
+  /* Responsive table → card for mobile */
+  @media (max-width: 640px) {
+    .mobile-card-table table,
+    .mobile-card-table thead,
+    .mobile-card-table tbody,
+    .mobile-card-table th,
+    .mobile-card-table td,
+    .mobile-card-table tr {
+      display: block;
+    }
+    .mobile-card-table thead {
+      display: none;
+    }
+    .mobile-card-table tbody tr {
+      @apply mb-4 rounded-xl border border-border bg-card p-4 shadow-sm;
+    }
+    .mobile-card-table td {
+      @apply flex items-start justify-between gap-2 py-1.5 text-sm;
+    }
+    .mobile-card-table td::before {
+      content: attr(data-label);
+      @apply shrink-0 font-semibold text-muted-foreground text-xs uppercase tracking-wide;
+      min-width: 100px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

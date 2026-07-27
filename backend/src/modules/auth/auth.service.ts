@@ -1,0 +1,343 @@
+import { AdminRole } from '@prisma/client';
+import { prisma } from '@config/prisma';
+import { logger } from '@config/logger';
+import { env } from '@config/env';
+import { hashPassword, comparePassword } from '@utils/password';
+import { hashToken } from '@utils/hashToken';
+import { generateCandidateCode } from '@utils/candidateCode';
+import { generateQrCodeDataUrl } from '@utils/qrcode';
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  UserRole,
+} from '@utils/jwt';
+import { ConflictError, ForbiddenError, UnauthorizedError, NotFoundError } from '@utils/AppError';
+import { v4 as uuidv4 } from 'uuid';
+import type { AdminLoginInput, CandidateLoginInput, CandidateRegisterInput } from './auth.validation';
+
+export interface RequestMeta {
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  refreshTokenExpiresAt: Date;
+}
+
+/** Converts a duration string like "7d" / "15m" into milliseconds. */
+function parseDurationToMs(duration: string): number {
+  const match = /^(\d+)([smhd])$/.exec(duration);
+  if (!match) return 15 * 60 * 1000; // sane fallback: 15 minutes
+  const value = Number(match[1]);
+  const unit = match[2];
+  const unitMs: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  return value * unitMs[unit];
+}
+
+async function issueTokenPair(
+  userId: string,
+  role: UserRole,
+  email: string,
+  meta: RequestMeta,
+  adminRole?: AdminRole,
+): Promise<TokenPair> {
+  const tokenId = uuidv4();
+
+  const accessToken = signAccessToken({ sub: userId, role, email, adminRole });
+  const refreshToken = signRefreshToken({ sub: userId, role, tokenId });
+
+  const refreshTokenExpiresAt = new Date(
+    Date.now() + parseDurationToMs(env.JWT_REFRESH_EXPIRES_IN),
+  );
+
+  await prisma.refreshToken.create({
+    data: {
+      tokenHash: hashToken(refreshToken),
+      adminId: role === 'ADMIN' ? userId : undefined,
+      candidateId: role === 'CANDIDATE' ? userId : undefined,
+      expiresAt: refreshTokenExpiresAt,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    },
+  });
+
+  return { accessToken, refreshToken, refreshTokenExpiresAt };
+}
+
+// ---------------------------------------------------------------------------
+// Admin auth
+// ---------------------------------------------------------------------------
+
+export async function adminLogin(input: AdminLoginInput, meta: RequestMeta) {
+  const admin = await prisma.admin.findUnique({ where: { email: input.email } });
+
+  if (!admin || !admin.isActive) {
+    throw new UnauthorizedError('Invalid email or password');
+  }
+
+  const validPassword = await comparePassword(input.password, admin.passwordHash);
+  if (!validPassword) {
+    throw new UnauthorizedError('Invalid email or password');
+  }
+
+  const tokens = await issueTokenPair(admin.id, 'ADMIN', admin.email, meta, admin.role);
+
+  await prisma.$transaction([
+    prisma.admin.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } }),
+    prisma.auditLog.create({
+      data: {
+        action: 'LOGIN',
+        entity: 'ADMIN',
+        entityId: admin.id,
+        adminId: admin.id,
+        description: `Admin ${admin.email} logged in`,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      },
+    }),
+  ]);
+
+  return {
+    tokens,
+    user: {
+      id: admin.id,
+      email: admin.email,
+      fullName: admin.fullName,
+      role: admin.role,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Candidate auth
+// ---------------------------------------------------------------------------
+
+export async function candidateRegister(input: CandidateRegisterInput, meta: RequestMeta) {
+  const existing = await prisma.candidate.findUnique({ where: { email: input.email } });
+  if (existing) {
+    throw new ConflictError('An account with this email already exists');
+  }
+
+  const [passwordHash, candidateCode] = await Promise.all([
+    hashPassword(input.password),
+    generateCandidateCode(),
+  ]);
+
+  const candidate = await prisma.candidate.create({
+    data: {
+      email: input.email,
+      passwordHash,
+      fullName: input.fullName,
+      phone: input.phone,
+      collegeName: input.collegeName,
+      degree: input.degree,
+      branch: input.branch,
+      graduationYear: input.graduationYear,
+      candidateCode,
+      status: 'REGISTERED',
+      metadata: input.qrRef ? { registeredViaQr: input.qrRef } : undefined,
+    },
+  });
+
+  const tokens = await issueTokenPair(candidate.id, 'CANDIDATE', candidate.email, meta);
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'CREATE',
+      entity: 'CANDIDATE',
+      entityId: candidate.id,
+      candidateId: candidate.id,
+      description: `Candidate ${candidate.email} registered${input.qrRef ? ' via QR' : ''}`,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    },
+  });
+
+  logger.info({ candidateId: candidate.id }, 'New candidate registered');
+
+  return {
+    tokens,
+    user: {
+      id: candidate.id,
+      email: candidate.email,
+      fullName: candidate.fullName,
+      candidateCode: candidate.candidateCode,
+      status: candidate.status,
+    },
+  };
+}
+
+export async function candidateLogin(input: CandidateLoginInput, meta: RequestMeta) {
+  const candidate = await prisma.candidate.findUnique({ where: { email: input.email } });
+
+  if (!candidate || !candidate.passwordHash) {
+    throw new UnauthorizedError('Invalid email or password');
+  }
+
+  const validPassword = await comparePassword(input.password, candidate.passwordHash);
+  if (!validPassword) {
+    throw new UnauthorizedError('Invalid email or password');
+  }
+
+  if (candidate.status === 'DISQUALIFIED') {
+    throw new ForbiddenError('This account has been disqualified and cannot log in');
+  }
+
+  const tokens = await issueTokenPair(candidate.id, 'CANDIDATE', candidate.email, meta);
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'LOGIN',
+      entity: 'CANDIDATE',
+      entityId: candidate.id,
+      candidateId: candidate.id,
+      description: `Candidate ${candidate.email} logged in`,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    },
+  });
+
+  return {
+    tokens,
+    user: {
+      id: candidate.id,
+      email: candidate.email,
+      fullName: candidate.fullName,
+      candidateCode: candidate.candidateCode,
+      status: candidate.status,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// QR Registration
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a QR code that deep-links to the candidate registration page.
+ * Optionally scoped to a specific exam via `examId` so posters at different
+ * recruitment drives route candidates into the right context.
+ */
+export async function generateQrRegistration(examId?: string) {
+  if (examId) {
+    const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { id: true, title: true } });
+    if (!exam) throw new NotFoundError('Exam not found');
+  }
+
+  const qrRef = uuidv4();
+  const registrationUrl = new URL('/register', env.CLIENT_URL);
+  registrationUrl.searchParams.set('ref', qrRef);
+  if (examId) registrationUrl.searchParams.set('examId', examId);
+
+  const qrCodeDataUrl = await generateQrCodeDataUrl(registrationUrl.toString());
+
+  return {
+    registrationUrl: registrationUrl.toString(),
+    qrCodeDataUrl,
+    qrRef,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Refresh token rotation
+// ---------------------------------------------------------------------------
+
+export async function rotateRefreshToken(rawRefreshToken: string, meta: RequestMeta) {
+  const payload = verifyRefreshToken(rawRefreshToken);
+  const incomingHash = hashToken(rawRefreshToken);
+
+  const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: incomingHash } });
+
+  if (!stored) {
+    // Token not recognized at all — could be forged; nothing further to revoke.
+    throw new UnauthorizedError('Invalid refresh token');
+  }
+
+  if (stored.revokedAt || stored.expiresAt < new Date()) {
+    // Reuse of an already-rotated (or expired) token strongly suggests theft.
+    // Revoke every outstanding token for this user as a precaution.
+    if (payload.role === 'ADMIN') {
+      await prisma.refreshToken.updateMany({
+        where: { adminId: payload.sub, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    } else {
+      await prisma.refreshToken.updateMany({
+        where: { candidateId: payload.sub, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    logger.warn({ userId: payload.sub, role: payload.role }, 'Refresh token reuse detected — all sessions revoked');
+    throw new UnauthorizedError('Session expired. Please log in again.');
+  }
+
+  // Valid, single-use token — rotate it.
+  await prisma.refreshToken.update({
+    where: { id: stored.id },
+    data: { revokedAt: new Date() },
+  });
+
+  let email: string;
+  let adminRole: AdminRole | undefined;
+
+  if (payload.role === 'ADMIN') {
+    const admin = await prisma.admin.findUnique({ where: { id: payload.sub } });
+    if (!admin || !admin.isActive) throw new UnauthorizedError('Account no longer active');
+    email = admin.email;
+    adminRole = admin.role;
+  } else {
+    const candidate = await prisma.candidate.findUnique({ where: { id: payload.sub } });
+    if (!candidate) throw new UnauthorizedError('Account not found');
+    if (candidate.status === 'DISQUALIFIED') throw new ForbiddenError('Account disqualified');
+    email = candidate.email;
+  }
+
+  const tokens = await issueTokenPair(payload.sub, payload.role, email, meta, adminRole);
+
+  return { tokens, role: payload.role };
+}
+
+export async function revokeRefreshToken(rawRefreshToken: string): Promise<void> {
+  const incomingHash = hashToken(rawRefreshToken);
+  await prisma.refreshToken.updateMany({
+    where: { tokenHash: incomingHash, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Current user profile ("/me")
+// ---------------------------------------------------------------------------
+
+export async function getCurrentUser(userId: string, role: UserRole) {
+  if (role === 'ADMIN') {
+    const admin = await prisma.admin.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, fullName: true, role: true, isActive: true, lastLoginAt: true },
+    });
+    if (!admin) throw new NotFoundError('Admin not found');
+    return { ...admin, userType: 'ADMIN' as const };
+  }
+
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      fullName: true,
+      candidateCode: true,
+      status: true,
+      collegeName: true,
+      degree: true,
+      branch: true,
+      graduationYear: true,
+      photoUrl: true,
+      systemCheckPassed: true,
+    },
+  });
+  if (!candidate) throw new NotFoundError('Candidate not found');
+  return { ...candidate, userType: 'CANDIDATE' as const };
+}
