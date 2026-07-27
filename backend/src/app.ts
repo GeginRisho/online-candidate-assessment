@@ -26,14 +26,28 @@ export function createApp(): Application {
   );
 
   // --- CORS --------------------------------------------------------------
+  const allowedOrigins = env.CLIENT_URL.split(',').map((url) => url.trim().replace(/\/$/, ''));
+  if (!allowedOrigins.includes('http://localhost:3000')) {
+    allowedOrigins.push('http://localhost:3000');
+  }
+
   app.use(
     cors({
-      origin: env.CLIENT_URL,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const cleanOrigin = origin.trim().replace(/\/$/, '');
+        if (allowedOrigins.includes(cleanOrigin) || allowedOrigins.includes('*')) {
+          callback(null, true);
+        } else {
+          callback(new Error(`Origin ${origin} not allowed by CORS`));
+        }
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
     }),
   );
+
 
   // --- Body / cookie parsing ----------------------------------------------
   app.use(express.json({ limit: '2mb' }));

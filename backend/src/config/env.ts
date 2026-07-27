@@ -7,7 +7,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   API_PREFIX: z.string().default('/api/v1'),
-  CLIENT_URL: z.string().url(),
+  CLIENT_URL: z.string().min(1),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 

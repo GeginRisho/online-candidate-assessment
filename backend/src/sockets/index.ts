@@ -23,14 +23,28 @@ export const SOCKET_EVENTS = {
 let io: SocketIOServer | null = null;
 
 export function initSocketServer(httpServer: HttpServer): SocketIOServer {
+  const allowedOrigins = env.CLIENT_URL.split(',').map((url) => url.trim().replace(/\/$/, ''));
+  if (!allowedOrigins.includes('http://localhost:3000')) {
+    allowedOrigins.push('http://localhost:3000');
+  }
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: env.CLIENT_URL,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const cleanOrigin = origin.trim().replace(/\/$/, '');
+        if (allowedOrigins.includes(cleanOrigin) || allowedOrigins.includes('*')) {
+          callback(null, true);
+        } else {
+          callback(new Error(`Origin ${origin} not allowed by CORS`));
+        }
+      },
       credentials: true,
     },
     pingInterval: 15000,
     pingTimeout: 10000,
   });
+
 
   io.use((socket: Socket, next) => {
     try {
