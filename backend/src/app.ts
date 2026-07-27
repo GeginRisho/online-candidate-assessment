@@ -131,7 +131,7 @@ export function createApp(): Application {
     }
   });
 
-  // --- Debug login — exposes real error, protected by same secret -----------
+  // --- Debug login — step-by-step trace to pinpoint 500 error ---------------
   app.post('/sys/debug-login', async (req, res) => {
     const secret = process.env.SEED_SECRET
       || process.env.SEED_ADMIN_PASSWORD
@@ -141,34 +141,71 @@ export function createApp(): Application {
       res.status(403).json({ success: false, message: 'Forbidden' });
       return;
     }
+    const steps: Record<string, unknown> = {};
     try {
-      // Use static prisma import
       const email = 'superadmin@assessment.local';
       const password = 'ChangeMe123!';
+
+      // Step 1: find admin
+      steps.step1 = 'findAdmin';
       const admin = await prisma.admin.findUnique({ where: { email } });
-      if (!admin) {
-        res.json({ found: false, email, message: 'Admin not found in DB' });
-        return;
-      }
+      steps.adminFound = !!admin;
+      if (!admin) { res.json({ steps, error: 'Admin not found' }); return; }
+
+      // Step 2: compare password
+      steps.step2 = 'comparePassword';
       const valid = await bcrypt.compare(password, admin.passwordHash);
-      res.json({
-        found: true,
-        email: admin.email,
-        isActive: admin.isActive,
-        role: admin.role,
-        hashPrefix: admin.passwordHash.slice(0, 10),
-        passwordValid: valid,
-        env: {
-          NODE_ENV: process.env.NODE_ENV,
-          JWT_ACCESS_SECRET_SET: !!process.env.JWT_ACCESS_SECRET,
-          JWT_REFRESH_SECRET_SET: !!process.env.JWT_REFRESH_SECRET,
-          DATABASE_URL_SET: !!process.env.DATABASE_URL,
+      steps.passwordValid = valid;
+      if (!valid) { res.json({ steps, error: 'Wrong password' }); return; }
+
+      // Step 3: sign JWT
+      steps.step3 = 'signJWT';
+      const jwt = await import('jsonwebtoken');
+      const accessToken = jwt.default.sign(
+        { sub: admin.id, role: 'ADMIN', email: admin.email, adminRole: admin.role },
+        process.env.JWT_ACCESS_SECRET as string,
+        { expiresIn: '15m' }
+      );
+      steps.jwtSigned = true;
+
+      // Step 4: create refresh token in DB
+      steps.step4 = 'createRefreshToken';
+      const { v4: uuidv4 } = await import('uuid');
+      const crypto = await import('crypto');
+      const rawRefreshToken = uuidv4();
+      const tokenHash = crypto.default.createHash('sha256').update(rawRefreshToken).digest('hex');
+      await prisma.refreshToken.create({
+        data: {
+          tokenHash,
+          adminId: admin.id,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
+      steps.refreshTokenCreated = true;
+
+      // Step 5: update lastLoginAt
+      steps.step5 = 'updateLastLogin';
+      await prisma.admin.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } });
+      steps.lastLoginUpdated = true;
+
+      // Step 6: create audit log
+      steps.step6 = 'createAuditLog';
+      await prisma.auditLog.create({
+        data: {
+          action: 'LOGIN',
+          entity: 'ADMIN',
+          entityId: admin.id,
+          adminId: admin.id,
+          description: `Debug login trace for ${admin.email}`,
+        },
+      });
+      steps.auditLogCreated = true;
+
+      res.json({ success: true, steps, accessToken: accessToken.slice(0, 20) + '...' });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      const errStack = err instanceof Error ? err.stack : undefined;
-      res.status(500).json({ success: false, error: errMsg, stack: errStack });
+      const errStack = err instanceof Error ? err.stack?.slice(0, 500) : undefined;
+      res.status(500).json({ success: false, failedAt: steps, error: errMsg, stack: errStack });
     }
   });
 
