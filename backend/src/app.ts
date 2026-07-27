@@ -1,4 +1,5 @@
 import express, { Application } from 'express';
+import { execSync } from 'child_process';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -10,6 +11,7 @@ import { logger } from '@config/logger';
 import { generalRateLimiter } from '@middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from '@middleware/errorHandler';
 import { apiRouter } from '@routes/index';
+import { ensureSuperAdmin } from '@utils/seedAdmin';
 
 export function createApp(): Application {
   const app = express();
@@ -98,6 +100,31 @@ export function createApp(): Application {
   // --- Health check ----------------------------------------------------------
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // --- System ops (migrate + seed) — protected by secret header -------------
+  app.post('/sys/migrate', async (req, res) => {
+    const secret = process.env.SEED_SECRET || process.env.SEED_ADMIN_PASSWORD;
+    const provided = req.headers['x-seed-secret'];
+    if (!secret || provided !== secret) {
+      res.status(403).json({ success: false, message: 'Forbidden' });
+      return;
+    }
+    try {
+      logger.info('🔄 [/sys/migrate] Running prisma migrate deploy...');
+      const output = execSync('node_modules/.bin/prisma migrate deploy', {
+        encoding: 'utf8',
+        cwd: process.cwd(),
+      });
+      logger.info('✅ [/sys/migrate] Migrations applied');
+      // Also run admin seed
+      await ensureSuperAdmin();
+      res.json({ success: true, message: 'Migrations applied + admin seeded', output });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error({ err }, '❌ [/sys/migrate] Failed');
+      res.status(500).json({ success: false, message: error });
+    }
   });
 
   // --- API routes --------------------------------------------------------
