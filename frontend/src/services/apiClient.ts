@@ -15,25 +15,54 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '@/types/auth';
  */
 function buildApiUrl(): string {
   const raw = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1').replace(/\/$/, '');
-  // If the URL already ends with /api/v1 or /api/v1/ leave it as-is
   if (/\/api\/v\d+$/.test(raw)) return raw;
-  // Otherwise append /api/v1
   return `${raw}/api/v1`;
 }
 
 const API_URL = buildApiUrl();
 
+// Storage key for persisting the access token across full-page reloads.
+// Cross-domain httpOnly cookies cannot travel from Render → Vercel, so we
+// persist the short-lived access token in sessionStorage instead.
+// sessionStorage is cleared when the browser tab is closed, which gives us
+// a reasonable security boundary without requiring refresh-cookie support.
+const TOKEN_KEY = 'at';
+
+function readPersistedToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) {
+      sessionStorage.setItem(TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
+  } catch {
+    // sessionStorage unavailable (e.g. private-browsing restrictions)
+  }
+}
+
 /**
- * The access token lives only in memory (module scope), never in
- * localStorage/sessionStorage, to keep it out of reach of XSS-based token
- * theft. It's rehydrated on page load via a silent call to /auth/refresh,
- * which relies on the httpOnly refresh-token cookie the browser already
- * holds.
+ * The access token lives in module memory for the current JS execution and
+ * is also persisted to sessionStorage so it survives full-page reloads
+ * within the same browser tab.
+ *
+ * It is NEVER stored in localStorage (persists indefinitely) to limit
+ * exposure window. sessionStorage is cleared when the tab closes.
  */
-let inMemoryAccessToken: string | null = null;
+let inMemoryAccessToken: string | null = readPersistedToken();
 
 export function setAccessToken(token: string | null): void {
   inMemoryAccessToken = token;
+  persistToken(token);
 }
 
 export function getAccessToken(): string | null {
@@ -47,8 +76,11 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (inMemoryAccessToken) {
-    config.headers.Authorization = `Bearer ${inMemoryAccessToken}`;
+  const token = inMemoryAccessToken ?? readPersistedToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+    // Sync in-memory if it was read from storage
+    if (!inMemoryAccessToken) inMemoryAccessToken = token;
   }
   return config;
 });
