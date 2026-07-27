@@ -1,7 +1,27 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/types/auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+/**
+ * Normalize the API base URL so it always ends with /api/v1.
+ *
+ * On Vercel, NEXT_PUBLIC_API_URL may be set to just the Render origin
+ * (e.g. https://online-candidate-assessment.onrender.com) without the
+ * /api/v1 path prefix. This causes every service call like
+ * apiClient.get('/exams') to hit /exams instead of /api/v1/exams.
+ *
+ * We detect both forms and normalise to the correct base URL:
+ *   https://...onrender.com          → https://...onrender.com/api/v1
+ *   https://...onrender.com/api/v1   → https://...onrender.com/api/v1  (unchanged)
+ */
+function buildApiUrl(): string {
+  const raw = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1').replace(/\/$/, '');
+  // If the URL already ends with /api/v1 or /api/v1/ leave it as-is
+  if (/\/api\/v\d+$/.test(raw)) return raw;
+  // Otherwise append /api/v1
+  return `${raw}/api/v1`;
+}
+
+const API_URL = buildApiUrl();
 
 /**
  * The access token lives only in memory (module scope), never in
