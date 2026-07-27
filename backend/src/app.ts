@@ -129,6 +129,48 @@ export function createApp(): Application {
     }
   });
 
+  // --- Debug login — exposes real error, protected by same secret -----------
+  app.post('/sys/debug-login', async (req, res) => {
+    const secret = process.env.SEED_SECRET
+      || process.env.SEED_ADMIN_PASSWORD
+      || 'render-migrate-2026';
+    const provided = req.headers['x-seed-secret'];
+    if (provided !== secret) {
+      res.status(403).json({ success: false, message: 'Forbidden' });
+      return;
+    }
+    try {
+      const { prisma } = await import('@config/prisma');
+      const bcrypt = await import('bcryptjs');
+      const email = 'superadmin@assessment.local';
+      const password = 'ChangeMe123!';
+      const admin = await prisma.admin.findUnique({ where: { email } });
+      if (!admin) {
+        res.json({ found: false, email, message: 'Admin not found in DB' });
+        return;
+      }
+      const valid = await bcrypt.compare(password, admin.passwordHash);
+      res.json({
+        found: true,
+        email: admin.email,
+        isActive: admin.isActive,
+        role: admin.role,
+        hashPrefix: admin.passwordHash.slice(0, 10),
+        passwordValid: valid,
+        env: {
+          NODE_ENV: process.env.NODE_ENV,
+          JWT_ACCESS_SECRET_SET: !!process.env.JWT_ACCESS_SECRET,
+          JWT_REFRESH_SECRET_SET: !!process.env.JWT_REFRESH_SECRET,
+          DATABASE_URL_SET: !!process.env.DATABASE_URL,
+        },
+      });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errStack = err instanceof Error ? err.stack : undefined;
+      res.status(500).json({ success: false, error: errMsg, stack: errStack });
+    }
+  });
+
   // --- API routes --------------------------------------------------------
   app.use(env.API_PREFIX, apiRouter);
   app.use('/', apiRouter);
