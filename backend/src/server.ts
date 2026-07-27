@@ -1,5 +1,6 @@
 import { createServer } from 'http';
-import { env } from '@config/env';
+import { execSync } from 'child_process';
+import { env, isProduction } from '@config/env';
 import { logger } from '@config/logger';
 import { connectDatabase, disconnectDatabase } from '@config/prisma';
 import { createApp } from './app';
@@ -7,6 +8,17 @@ import { initSocketServer } from '@sockets/index';
 import { ensureSuperAdmin } from '@utils/seedAdmin';
 
 async function bootstrap(): Promise<void> {
+  // Auto-apply migrations in production (e.g. Render deployment)
+  if (isProduction) {
+    try {
+      logger.info('🔄 Running prisma migrate deploy...');
+      execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      logger.info('✅ Prisma migrations applied');
+    } catch (err) {
+      logger.error({ err }, '❌ Prisma migrate deploy failed — continuing anyway');
+    }
+  }
+
   await connectDatabase();
   await ensureSuperAdmin();
 
