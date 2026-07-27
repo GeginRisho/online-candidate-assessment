@@ -102,6 +102,7 @@ export function createApp(): Application {
 
   // --- API routes --------------------------------------------------------
   app.use(env.API_PREFIX, apiRouter);
+  app.use('/', apiRouter);
 
   // --- 404 + error handling (must be last) ------------------------------
   app.use(notFoundHandler);
