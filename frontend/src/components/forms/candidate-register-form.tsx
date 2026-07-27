@@ -36,6 +36,7 @@ const registerSchema = z.object({
     .optional()
     .or(z.literal('')),
   collegeName: z.string().max(200).optional().or(z.literal('')),
+  degree: z.string().max(100).optional().or(z.literal('')),
   branch: z.string().max(100).optional().or(z.literal('')),
   graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
 });
@@ -56,6 +57,7 @@ export function CandidateRegisterForm({ qrRef }: { qrRef?: string }) {
       password: '',
       phone: '',
       collegeName: '',
+      degree: '',
       branch: '',
     },
   });
@@ -67,6 +69,7 @@ export function CandidateRegisterForm({ qrRef }: { qrRef?: string }) {
         ...values,
         phone: values.phone || undefined,
         collegeName: values.collegeName || undefined,
+        degree: values.degree || undefined,
         branch: values.branch || undefined,
         qrRef,
       });
@@ -205,6 +208,20 @@ export function CandidateRegisterForm({ qrRef }: { qrRef?: string }) {
                   <FormLabel>Branch / major</FormLabel>
                   <FormControl>
                     <Input placeholder="Computer Science" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="degree"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Degree / stream</FormLabel>
+                  <FormControl>
+                    <Input placeholder="B.Tech" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

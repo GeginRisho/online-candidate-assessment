@@ -211,6 +211,11 @@ export async function candidateRegister(input: CandidateRegisterInput, meta: Req
       fullName: candidate.fullName,
       candidateCode: candidate.candidateCode,
       status: candidate.status,
+      phone: candidate.phone,
+      collegeName: candidate.collegeName,
+      degree: candidate.degree,
+      branch: candidate.branch,
+      graduationYear: candidate.graduationYear,
     },
   };
 }
@@ -253,6 +258,11 @@ export async function candidateLogin(input: CandidateLoginInput, meta: RequestMe
       fullName: candidate.fullName,
       candidateCode: candidate.candidateCode,
       status: candidate.status,
+      phone: candidate.phone,
+      collegeName: candidate.collegeName,
+      degree: candidate.degree,
+      branch: candidate.branch,
+      graduationYear: candidate.graduationYear,
     },
   };
 }
