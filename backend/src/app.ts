@@ -103,6 +103,23 @@ export function createApp(): Application {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // --- Debug: test authRateLimiter middleware in isolation -------------------
+  app.post('/sys/test-route', async (req, res) => {
+    try {
+      res.json({
+        success: true,
+        ip: req.ip,
+        ips: req.ips,
+        xff: req.headers['x-forwarded-for'],
+        trustProxy: req.app.get('trust proxy'),
+        message: 'Route handler reached — no middleware crash',
+      });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: errMsg });
+    }
+  });
+
   // --- System ops (migrate + seed) — protected by secret header -------------
   app.post('/sys/migrate', async (req, res) => {
     // Accept: SEED_SECRET env var, SEED_ADMIN_PASSWORD env var, or one-time bootstrap secret
