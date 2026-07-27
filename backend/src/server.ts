@@ -12,7 +12,10 @@ async function bootstrap(): Promise<void> {
   if (isProduction) {
     try {
       logger.info('🔄 Running prisma migrate deploy...');
-      execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      execSync('node_modules/.bin/prisma migrate deploy', {
+        stdio: 'inherit',
+        cwd: process.cwd(),
+      });
       logger.info('✅ Prisma migrations applied');
     } catch (err) {
       logger.error({ err }, '❌ Prisma migrate deploy failed — continuing anyway');
