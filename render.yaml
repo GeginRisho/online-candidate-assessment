@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: online-candidate-assessment-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: API_PREFIX
+        value: /api/v1
+      # Add these in the Render dashboard — do NOT hardcode secrets here:
+      # DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECRET,
+      # CLIENT_URL, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD
