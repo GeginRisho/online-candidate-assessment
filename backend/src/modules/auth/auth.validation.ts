@@ -62,6 +62,18 @@ export const refreshTokenSchema = z.object({
   params: z.object({}).optional(),
 });
 
+export const adminRegisterSchema = z.object({
+  body: z.object({
+    email: z.string().email('Enter a valid email address').toLowerCase(),
+    password: passwordSchema,
+    fullName: z.string().min(2, 'Admin name is too short').max(120),
+    organization: z.string().min(2, 'Organization name is too short').max(120),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>['body'];
+export type AdminRegisterInput = z.infer<typeof adminRegisterSchema>['body'];
 export type CandidateRegisterInput = z.infer<typeof candidateRegisterSchema>['body'];
 export type CandidateLoginInput = z.infer<typeof candidateLoginSchema>['body'];

@@ -14,7 +14,7 @@ import {
 } from '@utils/jwt';
 import { ConflictError, ForbiddenError, UnauthorizedError, NotFoundError } from '@utils/AppError';
 import { v4 as uuidv4 } from 'uuid';
-import type { AdminLoginInput, CandidateLoginInput, CandidateRegisterInput } from './auth.validation';
+import type { AdminLoginInput, AdminRegisterInput, CandidateLoginInput, CandidateRegisterInput } from './auth.validation';
 
 export interface RequestMeta {
   ipAddress?: string;
@@ -99,6 +99,51 @@ export async function adminLogin(input: AdminLoginInput, meta: RequestMeta) {
       },
     }),
   ]);
+
+  return {
+    tokens,
+    user: {
+      id: admin.id,
+      email: admin.email,
+      fullName: admin.fullName,
+      role: admin.role,
+    },
+  };
+}
+
+export async function adminRegister(input: AdminRegisterInput, meta: RequestMeta) {
+  const existing = await prisma.admin.findUnique({ where: { email: input.email } });
+  if (existing) {
+    throw new ConflictError('An admin account with this email already exists');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  const admin = await prisma.admin.create({
+    data: {
+      email: input.email,
+      passwordHash,
+      fullName: `${input.fullName} (${input.organization})`,
+      role: 'ADMIN',
+      isActive: true,
+    },
+  });
+
+  const tokens = await issueTokenPair(admin.id, 'ADMIN', admin.email, meta, admin.role);
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'CREATE',
+      entity: 'ADMIN',
+      entityId: admin.id,
+      adminId: admin.id,
+      description: `Admin ${admin.email} registered from organization ${input.organization}`,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    },
+  });
+
+  logger.info({ adminId: admin.id }, 'New admin registered');
 
   return {
     tokens,

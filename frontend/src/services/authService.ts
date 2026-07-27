@@ -13,6 +13,14 @@ export interface AdminLoginPayload {
   password: string;
 }
 
+export interface AdminRegisterPayload {
+  email: string;
+  password: string;
+  fullName: string;
+  organization: string;
+}
+
+
 export interface CandidateRegisterPayload {
   email: string;
   password: string;
@@ -38,6 +46,16 @@ export async function adminLogin(payload: AdminLoginPayload): Promise<AdminUser>
   setAccessToken(data.data.accessToken);
   return data.data.user;
 }
+
+export async function adminRegister(payload: AdminRegisterPayload): Promise<AdminUser> {
+  const { data } = await apiClient.post<ApiSuccessResponse<LoginResult<AdminUser>>>(
+    '/auth/admin/register',
+    payload,
+  );
+  setAccessToken(data.data.accessToken);
+  return data.data.user;
+}
+
 
 export async function candidateRegister(
   payload: CandidateRegisterPayload,

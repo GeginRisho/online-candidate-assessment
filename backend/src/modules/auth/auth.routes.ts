@@ -4,6 +4,7 @@ import { requireAuth } from '@middleware/auth';
 import { authRateLimiter, generalRateLimiter } from '@middleware/rateLimiter';
 import {
   adminLoginSchema,
+  adminRegisterSchema,
   candidateRegisterSchema,
   candidateLoginSchema,
   qrRegistrationQuerySchema,
@@ -20,6 +21,14 @@ authRouter.post(
   validate(adminLoginSchema),
   authController.adminLogin,
 );
+
+authRouter.post(
+  '/admin/register',
+  authRateLimiter,
+  validate(adminRegisterSchema),
+  authController.adminRegister,
+);
+
 
 // --- Candidate -----------------------------------------------------------
 authRouter.post(

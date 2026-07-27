@@ -1,171 +1,229 @@
+'use client';
+
+import * as React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
+import QRCode from 'qrcode';
+import { toast } from 'sonner';
 import {
+  ShieldAlert,
   ArrowRight,
-  BarChart3,
-  Cpu,
-  QrCode,
-  ScanFace,
-  ShieldCheck,
-  Timer,
+  Copy,
+  ExternalLink,
+  Download,
+  Loader2,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
-import { SiteHeader } from '@/components/layout/site-header';
-import { SiteFooter } from '@/components/layout/site-footer';
-import { LiveSessionMonitor } from '@/components/marketing/live-session-monitor';
-
-const journey = [
-  {
-    step: '01',
-    title: 'Register',
-    description: 'Candidates sign up directly or scan a QR code at a recruitment drive to start instantly.',
-  },
-  {
-    step: '02',
-    title: 'System check',
-    description: 'Camera, microphone, and fullscreen access are verified before the clock ever starts.',
-  },
-  {
-    step: '03',
-    title: 'Take the test',
-    description: 'Timed aptitude and technical rounds, auto-saved answer by answer, proctored throughout.',
-  },
-  {
-    step: '04',
-    title: 'Get the result',
-    description: 'Scores, duration, and integrity status are ready the moment the session ends.',
-  },
-];
-
-const features = [
-  {
-    icon: ShieldCheck,
-    title: 'Real proctoring, not a checkbox',
-    description:
-      'Tab switches, blur events, fullscreen exits, copy/paste, and right-click are all detected and counted toward auto-disqualification thresholds you control.',
-  },
-  {
-    icon: Cpu,
-    title: 'Aptitude and technical question banks',
-    description:
-      'Tag questions by domain and difficulty, import from JSON or Excel, and let each exam draw a shuffled set automatically.',
-  },
-  {
-    icon: BarChart3,
-    title: 'Reporting that recruiters trust',
-    description:
-      'Start and end time, duration, warning count, and score for every candidate — exportable to Excel or PDF.',
-  },
-];
+import { Card, CardContent } from '@/components/ui/card';
 
 export default function LandingPage() {
+  const [qrUrl, setQrUrl] = React.useState<string>('');
+  const [appUrl, setAppUrl] = React.useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    }
+    return process.env.NEXT_PUBLIC_APP_URL || 'https://your-domain.com';
+  });
+  const [isCopied, setIsCopied] = React.useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = React.useState<boolean>(true);
+
+  React.useEffect(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com';
+    const targetUrl = process.env.NEXT_PUBLIC_APP_URL || origin;
+    
+    // Defer state update to satisfy set-state-in-effect rule
+    const timeoutId = setTimeout(() => {
+      setAppUrl(targetUrl);
+    }, 0);
+
+    QRCode.toDataURL(targetUrl, {
+      width: 200,
+      margin: 1.5,
+      color: {
+        dark: '#1e293b', // slate-800
+        light: '#ffffff',
+      },
+    })
+      .then((url) => {
+        setQrUrl(url);
+        setIsGenerating(false);
+      })
+      .catch((err) => {
+        console.error('Failed to generate QR Code:', err);
+        setIsGenerating(false);
+      });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(appUrl);
+      setIsCopied(true);
+      toast.success('Platform link copied to clipboard!');
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch {
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handleDownloadQr = () => {
+    if (!qrUrl) return;
+    const link = document.createElement('a');
+    link.href = qrUrl;
+    link.download = 'assessplatform-qr.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('QR Code downloaded successfully!');
+  };
+
+  const handleOpenPlatform = () => {
+    window.open(appUrl, '_blank');
+  };
+
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-
-      <main className="flex-1">
-        <section className="relative overflow-hidden">
-          <div className="container grid items-center gap-12 py-20 lg:grid-cols-2 lg:py-28">
-            <div className="max-w-xl">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs font-medium text-muted-foreground">
-                <Timer className="size-3.5" />
-                Built for high-stakes campus recruitment
-              </span>
-
-              <h1 className="mt-5 font-display text-4xl font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl">
-                Assessments that hold up to scrutiny.
-              </h1>
-
-              <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-                Run aptitude and technical rounds at scale with live proctoring, auto-save,
-                auto-submit, and reporting your hiring panel can act on the same day.
-              </p>
-
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Button size="lg" asChild>
-                  <Link href="/register">
-                    Register as a candidate
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
-                <Button size="lg" variant="outline" asChild>
-                  <Link href="/register/qr">
-                    <QrCode className="size-4" />
-                    Scan to register
-                  </Link>
-                </Button>
-              </div>
-
-              <p className="mt-4 text-sm text-muted-foreground">
-                Recruiting or proctoring an exam?{' '}
-                <Link href="/admin/login" className="font-medium text-primary underline-offset-4 hover:underline">
-                  Sign in to the admin console
-                </Link>
-              </p>
+    <div className="flex min-h-screen flex-col bg-white text-slate-900 antialiased">
+      {/* Navbar */}
+      <header className="border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
+        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+          <Link href="/" className="flex items-center gap-2 font-display text-base font-semibold tracking-tight">
+            <div className="flex size-7 items-center justify-center rounded-lg bg-blue-600">
+              <ShieldAlert className="size-4 text-white" />
             </div>
+            <span className="text-slate-900 font-bold">AssessPlatform</span>
+          </Link>
+          <nav className="flex items-center gap-6">
+            <Link
+              href="/login?role=student"
+              className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+            >
+              Student Login
+            </Link>
+            <Link
+              href="/login?role=admin"
+              className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+            >
+              Admin Login
+            </Link>
+          </nav>
+        </div>
+      </header>
 
-            <div className="flex justify-center lg:justify-end">
-              <LiveSessionMonitor />
-            </div>
-          </div>
-        </section>
+      {/* Hero Section */}
+      <main className="flex-1 flex flex-col items-center justify-center px-6 py-12 md:py-20 max-w-4xl mx-auto w-full">
+        <div className="text-center space-y-6 max-w-2xl">
+          <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 leading-[1.15]">
+            Online Candidate Assessment Platform
+          </h1>
+          <p className="text-base sm:text-lg text-slate-500 max-w-xl mx-auto leading-relaxed">
+            Secure online examinations with live monitoring, question bank, automated evaluation and reporting.
+          </p>
 
-        <section className="border-t border-border bg-secondary/30">
-          <div className="container py-20">
-            <h2 className="font-display text-2xl font-semibold tracking-tight">
-              From registration to result, in four steps
-            </h2>
-            <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {journey.map((item) => (
-                <div key={item.step} className="relative rounded-lg border border-border bg-card p-5">
-                  <span className="font-mono text-sm font-medium text-primary">{item.step}</span>
-                  <h3 className="mt-3 font-display text-base font-semibold">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="container py-20">
-          <h2 className="font-display text-2xl font-semibold tracking-tight">
-            Everything a hiring team needs, none of what it doesn&apos;t
-          </h2>
-          <div className="mt-10 grid gap-6 md:grid-cols-3">
-            {features.map(({ icon: Icon, title, description }) => (
-              <Card key={title}>
-                <CardContent className="pt-6">
-                  <div className="mb-4 flex size-10 items-center justify-center rounded-lg bg-accent">
-                    <Icon className="size-5 text-accent-foreground" />
-                  </div>
-                  <CardTitle className="text-base">{title}</CardTitle>
-                  <CardDescription className="mt-2 leading-relaxed">{description}</CardDescription>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-t border-border bg-secondary/30">
-          <div className="container flex flex-col items-center gap-4 py-16 text-center">
-            <ScanFace className="size-8 text-primary" />
-            <h2 className="font-display text-2xl font-semibold tracking-tight">
-              Ready to run your next assessment drive?
-            </h2>
-            <p className="max-w-md text-muted-foreground">
-              Set up your exam, generate a registration QR code, and watch sessions live as they happen.
-            </p>
-            <Button size="lg" asChild className="mt-2">
-              <Link href="/admin/login">
-                Go to admin console
-                <ArrowRight className="size-4" />
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <Button
+              asChild
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-5 rounded-lg shadow-sm transition-all"
+            >
+              <Link href="/login?role=student">
+                Student Login
+                <ArrowRight className="size-4 ml-2" />
               </Link>
             </Button>
+            <Button
+              asChild
+              variant="outline"
+              className="border-slate-200 text-slate-700 hover:bg-slate-50 font-medium px-6 py-5 rounded-lg transition-all"
+            >
+              <Link href="/login?role=admin">Admin Login</Link>
+            </Button>
           </div>
-        </section>
+        </div>
+
+        {/* Access Card */}
+        <div className="w-full max-w-md mt-16">
+          <Card className="border-slate-100 shadow-lg rounded-2xl overflow-hidden bg-white">
+            <div className="bg-slate-50/70 border-b border-slate-100 px-6 py-4">
+              <h2 className="font-display text-sm font-semibold text-slate-800 tracking-tight text-center">
+                Quick Access
+              </h2>
+            </div>
+            <CardContent className="p-6 flex flex-col items-center space-y-6">
+              {/* Platform URL display */}
+              <div className="w-full bg-slate-50 rounded-lg p-3 border border-slate-100 flex items-center justify-between gap-4">
+                <span className="text-xs font-mono text-slate-600 truncate break-all">
+                  {appUrl}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="p-1.5 rounded hover:bg-slate-200/50 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                  title="Copy link"
+                >
+                  {isCopied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
+                </button>
+              </div>
+
+              {/* QR Code Container */}
+              <div className="flex size-48 items-center justify-center rounded-xl border border-slate-100 bg-white p-2 shadow-inner">
+                {isGenerating ? (
+                  <Loader2 className="size-8 animate-spin text-slate-400" />
+                ) : (
+                  qrUrl && (
+                    <Image
+                      src={qrUrl}
+                      alt="AssessPlatform URL QR Code"
+                      width={180}
+                      height={180}
+                      className="object-contain rounded-lg"
+                      unoptimized
+                    />
+                  )
+                )}
+              </div>
+
+              <p className="text-xs text-slate-400 text-center max-w-[280px]">
+                Scan this QR code to open the assessment platform instantly.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-3 gap-2 w-full pt-2">
+                <Button
+                  variant="outline"
+                  onClick={handleCopyLink}
+                  className="border-slate-200 text-slate-600 hover:bg-slate-50 text-xs px-2 h-9 rounded-lg transition-all"
+                >
+                  <Copy className="size-3.5 mr-1.5" />
+                  Copy Link
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleOpenPlatform}
+                  className="border-slate-200 text-slate-600 hover:bg-slate-50 text-xs px-2 h-9 rounded-lg transition-all"
+                >
+                  <ExternalLink className="size-3.5 mr-1.5" />
+                  Open
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadQr}
+                  className="border-slate-200 text-slate-600 hover:bg-slate-50 text-xs px-2 h-9 rounded-lg transition-all"
+                  disabled={!qrUrl}
+                >
+                  <Download className="size-3.5 mr-1.5" />
+                  Download
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </main>
 
-      <SiteFooter />
+      {/* Footer */}
+      <footer className="py-6 text-center text-xs text-slate-400 border-t border-slate-100 bg-white">
+        &copy; {new Date().getFullYear()} AssessPlatform. All rights reserved.
+      </footer>
     </div>
   );
 }
