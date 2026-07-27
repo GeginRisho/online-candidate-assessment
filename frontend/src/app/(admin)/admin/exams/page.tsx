@@ -16,15 +16,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { fetchExams } from '@/services';
 
 export default function ExamsPage() {
-  const { data: exams = [], isLoading } = useQuery({
-    queryKey: ['exams'],
+  const { data: exams = [], isLoading, error, isError } = useQuery({
+    queryKey: ['admin-exams'],
     queryFn: fetchExams,
+    staleTime: 0,
   });
 
   if (isLoading) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="size-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 border border-destructive/20 bg-destructive/10 text-destructive rounded-lg space-y-2">
+        <h3 className="font-bold">Failed to load exams</h3>
+        <p className="text-sm">{(error as any)?.response?.data?.message || error?.message || 'Unknown error occurred'}</p>
       </div>
     );
   }

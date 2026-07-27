@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload } from '@/services';
+import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload, getAccessToken } from '@/services';
 import { parseQuestionOptions } from '@/utils/questionUtils';
 
 export default function ExamPage() {
@@ -130,7 +130,7 @@ export default function ExamPage() {
     }
     const socket = io(socketUrl, {
       auth: {
-        token: localStorage.getItem('accessToken') || undefined,
+        token: getAccessToken() || undefined,
       },
     });
 
