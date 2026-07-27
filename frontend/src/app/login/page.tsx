@@ -2,12 +2,12 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Eye, EyeOff, LogIn, ShieldAlert, GraduationCap, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, LogIn, ShieldAlert, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -33,53 +33,38 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const roleParam = searchParams.get('role');
   const { setUser } = useAuth();
-  
-  const [activeTab, setActiveTab] = React.useState<'student' | 'admin'>(() => {
-    if (roleParam === 'admin' || roleParam === 'student') {
-      return roleParam;
-    }
-    return 'student';
-  });
   const [showPassword, setShowPassword] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [rememberMe, setRememberMe] = React.useState(false);
-
-  React.useEffect(() => {
-    if (roleParam === 'admin' || roleParam === 'student') {
-      const id = setTimeout(() => {
-        setActiveTab(roleParam);
-      }, 0);
-      return () => clearTimeout(id);
-    }
-    return undefined;
-  }, [roleParam]);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
   });
 
-  // Reset password field when switching tabs
-  React.useEffect(() => {
-    form.setValue('password', '');
-  }, [activeTab, form]);
-
   async function onSubmit(values: LoginFormValues) {
     setIsSubmitting(true);
     try {
-      if (activeTab === 'student') {
+      // 1. Try to login as candidate first
+      try {
         const candidate = await candidateLogin(values);
         setUser({ ...candidate, userType: 'CANDIDATE' });
         toast.success(`Welcome back, ${candidate.fullName.split(' ')[0]}`);
         router.push('/candidate/dashboard');
-      } else {
+        return;
+      } catch (candidateError: any) {
+        // If it's a validation error or something structural, propagate it
+        if (candidateError.response?.status === 400 || candidateError.response?.status === 422) {
+          throw candidateError;
+        }
+
+        // 2. Otherwise try to login as admin
         const admin = await adminLogin(values);
         setUser({ ...admin, userType: 'ADMIN' });
         toast.success(`Welcome back, ${admin.fullName.split(' ')[0]}`);
         router.push('/admin/dashboard');
+        return;
       }
     } catch (error) {
       toast.error('Sign-in failed', {
@@ -124,40 +109,12 @@ function LoginContent() {
               Sign in to AssessPlatform
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              Please select your role and enter your credentials below.
+              Enter your email and password to access your dashboard.
             </p>
           </div>
 
-          {/* Role Tabs */}
-          <div className="mb-6 flex rounded-lg bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('student')}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-sm font-medium transition-all ${
-                activeTab === 'student'
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <GraduationCap className="size-4" />
-              Student
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('admin')}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-sm font-medium transition-all ${
-                activeTab === 'admin'
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShieldAlert className="size-4" />
-              Admin
-            </button>
-          </div>
-
           {/* Form Card */}
-          <Card className="border-slate-100 shadow-sm">
+          <Card className="border-slate-100 shadow-sm rounded-xl">
             <CardContent className="pt-6">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
@@ -170,11 +127,9 @@ function LoginContent() {
                         <FormControl>
                           <Input
                             type="email"
-                            placeholder={
-                              activeTab === 'student' ? 'student@example.com' : 'admin@company.com'
-                            }
+                            placeholder="you@example.com"
                             autoComplete="email"
-                            className="border-slate-200 focus-visible:ring-blue-600"
+                            className="border-slate-200 focus-visible:ring-blue-600 rounded-lg"
                             {...field}
                           />
                         </FormControl>
@@ -203,7 +158,7 @@ function LoginContent() {
                             <Input
                               type={showPassword ? 'text' : 'password'}
                               autoComplete="current-password"
-                              className="pr-10 border-slate-200 focus-visible:ring-blue-600"
+                              className="pr-10 border-slate-200 focus-visible:ring-blue-600 rounded-lg"
                               {...field}
                             />
                             <button
@@ -226,7 +181,7 @@ function LoginContent() {
                       id="remember"
                       checked={rememberMe}
                       onCheckedChange={(checked) => setRememberMe(!!checked)}
-                      className="border-slate-300 text-blue-600 focus-visible:ring-blue-600 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                      className="border-slate-300 text-blue-600 focus-visible:ring-blue-600 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 rounded"
                     />
                     <Label htmlFor="remember" className="text-xs font-normal text-slate-500 cursor-pointer">
                       Remember me for 30 days
@@ -235,7 +190,7 @@ function LoginContent() {
 
                   <Button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors mt-2"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors mt-2 rounded-lg"
                     loading={isSubmitting}
                   >
                     <LogIn className="size-4 mr-2" />
@@ -253,7 +208,7 @@ function LoginContent() {
               href="/register"
               className="font-medium text-blue-600 hover:underline"
             >
-              Register here
+              Register
             </Link>
           </p>
         </div>
@@ -280,4 +235,3 @@ export default function LoginPage() {
     </React.Suspense>
   );
 }
-
