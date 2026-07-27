@@ -19,7 +19,6 @@ import {
   Copy,
   ExternalLink,
   Check,
-  Award,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -150,9 +149,9 @@ function LoginContent() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-white">
+    <div className="flex min-h-screen flex-col bg-slate-50/20">
       {/* Header with minimal Top-Right Quick Access Actions */}
-      <header className="border-b border-slate-100 bg-white sticky top-0 z-45">
+      <header className="border-b border-slate-100 bg-white sticky top-0 z-40">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900">
             <div className="flex size-7 items-center justify-center rounded-lg bg-blue-600">
@@ -167,7 +166,7 @@ function LoginContent() {
               title="View Candidate QR Registration Code"
               aria-label="QR Code"
             >
-              <QrCode className="size-4" />
+              <QrCode className="size-4 text-blue-600" />
             </button>
             <button
               onClick={handleCopyLink}
@@ -189,20 +188,20 @@ function LoginContent() {
         </div>
       </header>
 
-      {/* Main Grid Content */}
-      <div className="flex-1 flex flex-col md:grid md:grid-cols-12 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 md:py-12 gap-8 md:gap-12 items-center">
-        
-        {/* Right Column (appears first on mobile due to order-1) */}
-        <div className="order-1 md:order-2 md:col-span-5 flex flex-col justify-center w-full space-y-6">
-          <div className="text-center md:text-left space-y-2">
-            <h3 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-              Welcome to AssessPlatform
-            </h3>
-            <p className="text-slate-500 text-xs sm:text-sm">
-              Enter your credentials to access your scheduled drive.
+      {/* Main Centered Content */}
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-8 md:py-16">
+        <div className="w-full max-w-[400px] space-y-6">
+          {/* Header Title & Description */}
+          <div className="text-center space-y-3">
+            <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight">
+              Online Candidate Assessment Platform
+            </h2>
+            <p className="text-slate-500 text-xs sm:text-sm leading-relaxed">
+              Secure online examinations with live monitoring and automated evaluation.
             </p>
           </div>
 
+          {/* Login Card */}
           <Card className="border-slate-100 shadow-lg rounded-2xl overflow-hidden bg-white">
             <CardContent className="p-6">
               <Form {...form}>
@@ -291,6 +290,7 @@ function LoginContent() {
             </CardContent>
           </Card>
 
+          {/* Bottom Register Link */}
           <p className="text-center text-xs sm:text-sm text-slate-500">
             Don&apos;t have an account?{' '}
             <Link
@@ -301,8 +301,8 @@ function LoginContent() {
             </Link>
           </p>
 
-          {/* Mobile-only QR/Copy/Open Action buttons below login card */}
-          <div className="flex md:hidden items-center justify-center gap-3 pt-2">
+          {/* QR / Copy / Open Action Buttons below the login card */}
+          <div className="flex items-center justify-center gap-3 pt-2">
             <button
               onClick={() => setQrModalOpen(true)}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-sm text-xs font-medium"
@@ -326,44 +326,7 @@ function LoginContent() {
             </button>
           </div>
         </div>
-
-        {/* Left Column: Title, Short Description, and Abstract Graphic (appears second on mobile due to order-2) */}
-        <div className="order-2 md:order-1 md:col-span-7 flex flex-col justify-center space-y-8 bg-slate-50/55 rounded-3xl p-6 lg:p-12 border border-slate-100 min-h-[320px] md:min-h-[460px]">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold uppercase tracking-wider">
-              <Award className="size-3.5" />
-              Assessments Redefined
-            </div>
-            <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 leading-[1.1]">
-              Online Candidate Assessment Platform
-            </h2>
-            <p className="text-slate-500 text-xs sm:text-sm md:text-base leading-relaxed max-w-lg">
-              Secure online examinations with live monitoring and automated evaluation.
-            </p>
-          </div>
-
-          {/* Clean abstract background illustration only (no statistics or cards) */}
-          <div className="relative w-full aspect-[2.2/1] rounded-2xl overflow-hidden bg-gradient-to-tr from-blue-500/10 via-indigo-500/5 to-transparent border border-slate-100/80 flex items-center justify-center p-6">
-            <svg className="w-full h-full max-h-[160px]" viewBox="0 0 400 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="200" cy="100" r="70" stroke="url(#paint0_linear)" strokeWidth="1.5" strokeDasharray="5 5" />
-              <circle cx="200" cy="100" r="35" fill="url(#paint1_linear)" fillOpacity="0.8" />
-              <path d="M110 100H290" stroke="#3b82f6" strokeWidth="1" strokeLinecap="round" strokeDasharray="3 3" />
-              <path d="M200 15V185" stroke="#3b82f6" strokeWidth="1" strokeLinecap="round" strokeDasharray="3 3" />
-              <defs>
-                <linearGradient id="paint0_linear" x1="110" y1="100" x2="290" y2="100" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#3b82f6" />
-                  <stop offset="1" stopColor="#6366f1" />
-                </linearGradient>
-                <linearGradient id="paint1_linear" x1="165" y1="100" x2="235" y2="100" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#2563eb" />
-                  <stop offset="1" stopColor="#4f46e5" />
-                </linearGradient>
-              </defs>
-            </svg>
-          </div>
-        </div>
-
-      </div>
+      </main>
 
       {/* QR Code Popup Modal */}
       <Dialog open={qrModalOpen} onOpenChange={setQrModalOpen}>

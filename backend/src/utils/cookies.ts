@@ -7,8 +7,7 @@ export function setRefreshTokenCookie(res: Response, token: string, maxAgeMs: nu
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
-    domain: isProduction ? env.COOKIE_DOMAIN : undefined,
+    sameSite: isProduction ? 'none' : 'lax',
     path: `${env.API_PREFIX}/auth`,
     maxAge: maxAgeMs,
     signed: true,
@@ -19,8 +18,7 @@ export function clearRefreshTokenCookie(res: Response): void {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
-    domain: isProduction ? env.COOKIE_DOMAIN : undefined,
+    sameSite: isProduction ? 'none' : 'lax',
     path: `${env.API_PREFIX}/auth`,
   });
 }
