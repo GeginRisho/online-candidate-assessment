@@ -27,9 +27,16 @@ export function createApp(): Application {
 
   // --- CORS --------------------------------------------------------------
   const allowedOrigins = env.CLIENT_URL.split(',').map((url) => url.trim().replace(/\/$/, ''));
-  if (!allowedOrigins.includes('http://localhost:3000')) {
-    allowedOrigins.push('http://localhost:3000');
-  }
+  const fallbacks = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://online-candidate-assessment.vercel.app'
+  ];
+  fallbacks.forEach((url) => {
+    if (!allowedOrigins.includes(url)) {
+      allowedOrigins.push(url);
+    }
+  });
 
   app.use(
     cors({

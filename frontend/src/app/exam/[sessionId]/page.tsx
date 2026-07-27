@@ -121,7 +121,13 @@ export default function ExamPage() {
 
   // Initialize socket connection
   React.useEffect(() => {
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:4000';
+    let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    if (!socketUrl && process.env.NEXT_PUBLIC_API_URL) {
+      socketUrl = process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '');
+    }
+    if (!socketUrl) {
+      socketUrl = 'http://localhost:4000';
+    }
     const socket = io(socketUrl, {
       auth: {
         token: localStorage.getItem('accessToken') || undefined,
