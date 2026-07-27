@@ -11,6 +11,8 @@ import { logger } from '@config/logger';
 import { generalRateLimiter } from '@middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from '@middleware/errorHandler';
 import { apiRouter } from '@routes/index';
+import bcrypt from 'bcryptjs';
+import { prisma } from '@config/prisma';
 import { ensureSuperAdmin } from '@utils/seedAdmin';
 
 export function createApp(): Application {
@@ -140,8 +142,7 @@ export function createApp(): Application {
       return;
     }
     try {
-      const { prisma } = await import('@config/prisma');
-      const bcrypt = await import('bcryptjs');
+      // Use static prisma import
       const email = 'superadmin@assessment.local';
       const password = 'ChangeMe123!';
       const admin = await prisma.admin.findUnique({ where: { email } });
