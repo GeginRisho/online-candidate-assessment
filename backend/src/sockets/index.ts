@@ -23,24 +23,23 @@ export const SOCKET_EVENTS = {
 let io: SocketIOServer | null = null;
 
 export function initSocketServer(httpServer: HttpServer): SocketIOServer {
-  const allowedOrigins = env.CLIENT_URL.split(',').map((url) => url.trim().replace(/\/$/, ''));
-  const fallbacks = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://online-candidate-assessment.vercel.app'
-  ];
-  fallbacks.forEach((url) => {
-    if (!allowedOrigins.includes(url)) {
-      allowedOrigins.push(url);
+  const allowedOrigins = (env.CLIENT_URL || '')
+    .split(',')
+    .map((url) => url.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+  if (env.NODE_ENV !== 'production') {
+    if (!allowedOrigins.includes('http://localhost:3000')) {
+      allowedOrigins.push('http://localhost:3000');
     }
-  });
+  }
 
   io = new SocketIOServer(httpServer, {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         const cleanOrigin = origin.trim().replace(/\/$/, '');
-        if (allowedOrigins.includes(cleanOrigin) || allowedOrigins.includes('*')) {
+        if (allowedOrigins.includes(cleanOrigin)) {
           callback(null, true);
         } else {
           callback(new Error(`Origin ${origin} not allowed by CORS`));
