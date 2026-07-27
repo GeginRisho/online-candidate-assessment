@@ -4,9 +4,11 @@ import { logger } from '@config/logger';
 import { connectDatabase, disconnectDatabase } from '@config/prisma';
 import { createApp } from './app';
 import { initSocketServer } from '@sockets/index';
+import { ensureSuperAdmin } from '@utils/seedAdmin';
 
 async function bootstrap(): Promise<void> {
   await connectDatabase();
+  await ensureSuperAdmin();
 
   const app = createApp();
   const httpServer = createServer(app);
