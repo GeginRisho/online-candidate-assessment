@@ -30,20 +30,35 @@ export function createApp(): Application {
     .map((url) => url.trim().replace(/\/$/, ''))
     .filter(Boolean);
 
-  if (env.NODE_ENV !== 'production') {
-    if (!allowedOrigins.includes('http://localhost:3000')) {
-      allowedOrigins.push('http://localhost:3000');
+  const isOriginAllowed = (origin: string): boolean => {
+    const cleanOrigin = origin.trim().replace(/\/$/, '');
+    
+    // Allow localhost:3000 and localhost:5173
+    if (/^https?:\/\/localhost:(3000|5173)$/.test(cleanOrigin)) {
+      return true;
     }
-  }
+    
+    // Allow any .vercel.app origin (including subdomains/preview urls)
+    if (/^https:\/\/[a-zA-Z0-9-._]+\.vercel\.app$/.test(cleanOrigin)) {
+      return true;
+    }
+    
+    // Allow origins listed in CLIENT_URL env variable
+    if (allowedOrigins.includes(cleanOrigin)) {
+      return true;
+    }
+    
+    return false;
+  };
 
   const corsMiddleware = cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      const cleanOrigin = origin.trim().replace(/\/$/, '');
-      if (allowedOrigins.includes(cleanOrigin)) {
+      if (isOriginAllowed(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
+        // Do NOT throw error to prevent app crash/noise, just callback with false
+        callback(null, false);
       }
     },
     credentials: true,
