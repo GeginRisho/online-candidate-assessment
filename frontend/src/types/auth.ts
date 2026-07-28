@@ -22,12 +22,15 @@ export type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'RECRUITER' | 'PROCTOR';
 
 export type CandidateStatus =
   | 'REGISTERED'
-  | 'VERIFIED'
+  | 'WAITING_APPROVAL'
+  | 'APPROVED'
   | 'IN_PROGRESS'
-  | 'SUBMITTED'
-  | 'DISQUALIFIED'
   | 'COMPLETED'
-  | 'ABSENT';
+  | 'AUTO_SUBMITTED'
+  | 'REJECTED'
+  | 'DISQUALIFIED'
+  | 'ABSENT'
+  | 'VERIFIED';
 
 export interface AdminUser {
   id: string;

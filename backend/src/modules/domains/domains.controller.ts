@@ -4,7 +4,7 @@ import { sendSuccess } from '@utils/ApiResponse';
 import { BadRequestError, UnauthorizedError } from '@utils/AppError';
 import * as domainsService from './domains.service';
 
-export const getActiveDomains = asyncHandler(async (req: Request, res: Response) => {
+export const getActiveDomains = asyncHandler(async (_req: Request, res: Response) => {
   const domains = await domainsService.getActiveDomains();
   sendSuccess(res, domains, 'Active domains retrieved successfully');
 });

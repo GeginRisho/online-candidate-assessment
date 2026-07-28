@@ -147,3 +147,30 @@ export const selectDomain = asyncHandler(async (req: Request, res: Response) => 
   const result = await sessionsService.selectDomain(id, domain);
   sendSuccess(res, result, 'Domain selected successfully');
 });
+
+export const resetSession = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { id } = req.params;
+  const result = await sessionsService.resetSession(id, req.user.id);
+  sendSuccess(res, result, 'Candidate exam session reset successfully');
+});
+
+export const approveAllCandidates = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const result = await sessionsService.approveAllCandidates(req.user.id);
+  sendSuccess(res, result, 'All pending candidates approved successfully');
+});
+
+export const allowReattempt = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { id } = req.params;
+  const { reason } = req.body;
+  const result = await sessionsService.allowReattempt(id, reason, req.user.id);
+  sendSuccess(res, result, 'Candidate reattempt granted successfully');
+});

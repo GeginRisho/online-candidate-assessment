@@ -11,25 +11,18 @@ import {
   Plus,
   Award,
   CheckCircle,
-  Clock,
-  TrendingUp,
   RefreshCw,
   Check,
   X,
   Play,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { fetchExams, fetchAllCandidateSessionsAdmin, approveCandidate, rejectCandidate, startCandidateExam } from '@/services';
+import { fetchAllCandidateSessionsAdmin, approveCandidate, rejectCandidate, startCandidateExam, approveAllCandidates } from '@/services';
+import { apiClient } from '@/services/apiClient';
 
 export default function AdminDashboardPage() {
-  const { data: exams = [] } = useQuery({
-    queryKey: ['admin-exams'],
-    queryFn: fetchExams,
-    refetchInterval: 15000,
-    staleTime: 0,
-  });
-
   const { data: sessions = [], dataUpdatedAt } = useQuery({
     queryKey: ['admin-candidate-sessions'],
     queryFn: fetchAllCandidateSessionsAdmin,
@@ -47,6 +40,17 @@ export default function AdminDashboardPage() {
     },
     onError: (err: any) => {
       toast.error('Failed to approve candidate: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const approveAllMutation = useMutation({
+    mutationFn: approveAllCandidates,
+    onSuccess: () => {
+      toast.success('All pending candidates approved successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to approve all candidates: ' + (err.response?.data?.message || err.message));
     },
   });
 
@@ -72,31 +76,38 @@ export default function AdminDashboardPage() {
     },
   });
 
-  const pendingSessions = sessions.filter((s: any) => s.candidate?.status === 'REGISTERED');
-  const approvedSessions = sessions.filter((s: any) => s.candidate?.status === 'VERIFIED');
+  const pendingSessions = sessions.filter((s: any) => s.candidate?.status === 'WAITING_APPROVAL' || s.candidate?.status === 'REGISTERED');
+  const approvedSessions = sessions.filter((s: any) => s.candidate?.status === 'APPROVED' || s.candidate?.status === 'VERIFIED');
 
-  const activeExamsCount = exams.filter((e) => e.status === 'ACTIVE').length;
   const runningSessions = sessions.filter((s: any) => s.status === 'IN_PROGRESS');
   const completedSessions = sessions.filter((s: any) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED');
+  const disqualifiedSessions = sessions.filter((s: any) => s.status === 'DISQUALIFIED' || s.candidate?.status === 'DISQUALIFIED');
   const notStartedSessions = sessions.filter((s: any) => s.status === 'NOT_STARTED');
-  const totalWarnings = sessions.reduce((acc: number, s: any) => acc + (s.warningCount || 0), 0);
+  const reattemptCount = sessions.filter((s: any) => s.attemptNumber > 1).length;
 
-  // Use result.status for accurate pass rate
-  const passedSessions = completedSessions.filter((s: any) => s.result?.status === 'PASS');
-  const passPercent = completedSessions.length > 0 ? Math.round((passedSessions.length / completedSessions.length) * 100) : 0;
-
-  // Average score from result data
-  const avgScore = completedSessions.length > 0
-    ? Math.round(completedSessions.reduce((acc: number, s: any) => acc + (s.result?.percentage ?? 0), 0) / completedSessions.length)
-    : 0;
+  const handleExportExcel = async () => {
+    try {
+      const response = await apiClient.get('/exam-sessions/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'candidate_results.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      toast.success('Excel results exported successfully');
+    } catch (error: any) {
+      toast.error('Failed to export Excel results: ' + (error.response?.data?.message || error.message));
+    }
+  };
 
   const kpis = [
-    { label: 'Total Candidates', value: sessions.length, sub: `${activeExamsCount} active exam(s)`, icon: Users, color: 'text-blue-600', iconBg: 'bg-blue-50' },
-    { label: 'Submitted', value: completedSessions.length, sub: `${passedSessions.length} passed`, icon: CheckCircle, color: 'text-emerald-600', iconBg: 'bg-emerald-50' },
-    { label: 'In Progress', value: runningSessions.length, sub: `${notStartedSessions.length} not yet started`, icon: Clock, color: 'text-amber-600', iconBg: 'bg-amber-50' },
-    { label: 'Pass Rate', value: `${passPercent}%`, sub: `Avg score: ${avgScore}%`, icon: Award, color: 'text-purple-600', iconBg: 'bg-purple-50' },
-    { label: 'Integrity Warnings', value: totalWarnings, sub: 'Tab-switch & proctor alerts', icon: ShieldAlert, color: 'text-red-600', iconBg: 'bg-red-50' },
-    { label: 'Avg Score', value: `${avgScore}%`, sub: `From ${completedSessions.length} submitted exams`, icon: TrendingUp, color: 'text-indigo-600', iconBg: 'bg-indigo-50' },
+    { label: 'Pending Candidates', value: pendingSessions.length, sub: 'Waiting for admin approval', icon: Users, color: 'text-amber-600', iconBg: 'bg-amber-50' },
+    { label: 'Approved Candidates', value: approvedSessions.length, sub: 'Ready for exam activation', icon: CheckCircle, color: 'text-teal-600', iconBg: 'bg-teal-50' },
+    { label: 'Running Candidates', value: runningSessions.length, sub: 'Currently writing exam', icon: Activity, color: 'text-blue-600', iconBg: 'bg-blue-50' },
+    { label: 'Completed Candidates', value: completedSessions.length, sub: 'Submitted exam papers', icon: Award, color: 'text-emerald-600', iconBg: 'bg-emerald-50' },
+    { label: 'Disqualified Candidates', value: disqualifiedSessions.length, sub: 'Violated rules / disqualified', icon: ShieldAlert, color: 'text-red-600', iconBg: 'bg-red-50' },
+    { label: 'Reattempt Count', value: reattemptCount, sub: 'Granted second attempt', icon: RefreshCw, color: 'text-purple-600', iconBg: 'bg-purple-50' },
   ];
 
   return (
@@ -109,9 +120,20 @@ export default function AdminDashboardPage() {
             Welcome back. Live stats — auto-refreshes every 10 seconds.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <RefreshCw className="size-3.5 animate-spin" style={{ animationDuration: '3s' }} />
-          <span>Updated {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : '—'}</span>
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={handleExportExcel}
+            variant="outline"
+            size="sm"
+            className="bg-white hover:bg-slate-50 text-slate-700 font-semibold border-slate-200 text-xs rounded-xl h-9 gap-1.5 px-3.5 shadow-sm transition-all"
+          >
+            <Download className="size-4" />
+            <span>Export Excel</span>
+          </Button>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-slate-50 border border-slate-100 rounded-xl px-3 py-1.5">
+            <RefreshCw className="size-3.5 animate-spin" style={{ animationDuration: '3s' }} />
+            <span>Updated {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : '—'}</span>
+          </div>
         </div>
       </div>
 
@@ -175,9 +197,26 @@ export default function AdminDashboardPage() {
           <CardContent className="space-y-6">
             {/* Pending approvals block */}
             <div>
-              <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">
-                Pending Approvals ({pendingSessions.length})
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                  Pending Approvals ({pendingSessions.length})
+                </h3>
+                {pendingSessions.length > 0 && (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl h-8 gap-1.5 px-3 shadow-sm transition-all"
+                    onClick={() => {
+                      if (confirm('Are you sure you want to approve all waiting candidates?')) {
+                        approveAllMutation.mutate();
+                      }
+                    }}
+                    loading={approveAllMutation.isPending}
+                  >
+                    <Check className="size-3.5" />
+                    <span>Approve All</span>
+                  </Button>
+                )}
+              </div>
               {pendingSessions.length > 0 ? (
                 <div className="space-y-3">
                   {pendingSessions.map((s: any) => (
@@ -188,9 +227,6 @@ export default function AdminDashboardPage() {
                       <div className="min-w-0">
                         <div className="font-semibold text-foreground text-sm flex items-center gap-2">
                           {s.candidate?.fullName}
-                          <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono">
-                            Yr: {s.candidate?.yearOfStudy || 'N/A'}
-                          </span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5 truncate">
                           {s.candidate?.email} · {s.candidate?.collegeName} · {s.candidate?.degree} ({s.candidate?.branch})

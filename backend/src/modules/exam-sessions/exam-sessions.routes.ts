@@ -73,6 +73,20 @@ sessionsRouter.post(
 );
 
 sessionsRouter.post(
+  '/approve-all',
+  requireAuth,
+  requireRole('ADMIN'),
+  sessionsController.approveAllCandidates,
+);
+
+sessionsRouter.post(
+  '/:id/allow-reattempt',
+  requireAuth,
+  requireRole('ADMIN'),
+  sessionsController.allowReattempt,
+);
+
+sessionsRouter.post(
   '/:id/disqualify',
   requireAuth,
   requireRole('ADMIN'),
@@ -84,6 +98,13 @@ sessionsRouter.post(
   requireAuth,
   requireRole('ADMIN'),
   sessionsController.forceSubmitSession,
+);
+
+sessionsRouter.post(
+  '/:id/reset',
+  requireAuth,
+  requireRole('ADMIN'),
+  sessionsController.resetSession,
 );
 
 // Shared / Candidate endpoints (Using optionalAuth, secure check via sessionId in controller)

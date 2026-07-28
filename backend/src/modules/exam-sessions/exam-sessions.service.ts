@@ -84,8 +84,17 @@ export async function startSession(
   return session;
 }
 
+function getRandomSubset<T>(arr: T[], size: number): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, size);
+}
+
 export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE') {
-  const session = await prisma.examSession.findUnique({
+  let session = await prisma.examSession.findUnique({
     where: { id },
     include: {
       exam: {
@@ -110,34 +119,176 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
           status: true,
         },
       },
-      answers: true,
+      answers: {
+        include: {
+          question: true,
+        },
+      },
       warnings: true,
     },
   });
 
   if (!session) throw new NotFoundError('Exam session not found');
 
-  const cleanExamQuestions = session.exam.examQuestions.map((eq) => {
-    const formatted = formatQuestion(eq.question);
-    if (role === 'CANDIDATE') {
-      // Omit correct answer and explanation to prevent client-side inspection cheating
-      const { correctAnswer, explanation, ...safeQuestion } = formatted;
-      return { ...eq, question: safeQuestion };
-    }
-    return { ...eq, question: formatted };
-  });
-
-  if (session.exam.shuffleQuestions) {
-    // Shuffling questions deterministically based on sessionId seed or simply randomly
-    cleanExamQuestions.sort(() => 0.5 - Math.random());
+  // Initialize start times when candidate loads the exam page for the first time
+  if (role === 'CANDIDATE' && session.status === 'IN_PROGRESS' && !session.aptitudeStartedAt) {
+    session = await prisma.examSession.update({
+      where: { id },
+      data: {
+        startedAt: new Date(),
+        aptitudeStartedAt: new Date(),
+      },
+      include: {
+        exam: {
+          include: {
+            examQuestions: {
+              orderBy: { order: 'asc' },
+              include: {
+                question: true,
+              },
+            },
+          },
+        },
+        candidate: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            collegeName: true,
+            branch: true,
+            degree: true,
+            yearOfStudy: true,
+            status: true,
+          },
+        },
+        answers: {
+          include: {
+            question: true,
+          },
+        },
+        warnings: true,
+      },
+    });
   }
 
-  // If shuffleOptions is true and format is MCQ, shuffle the options for candidate
+  // Lazily initialize aptitude questions if none exist and session is in progress
+  const hasAptitudeAnswers = session.answers.some(a => a.question.type === 'APTITUDE');
+  if (session.status === 'IN_PROGRESS' && !hasAptitudeAnswers) {
+    const aptitudePool = session.exam.examQuestions.filter(
+      (eq) => eq.question.type === 'APTITUDE'
+    );
+    const selectedAptitude = getRandomSubset(aptitudePool, session.exam.aptitudeQuestionCount);
+
+    if (selectedAptitude.length > 0) {
+      await prisma.answer.createMany({
+        data: selectedAptitude.map((eq) => ({
+          examSessionId: session!.id,
+          candidateId: session!.candidateId,
+          questionId: eq.questionId,
+          timeSpentSec: 0,
+        })),
+        skipDuplicates: true,
+      });
+
+      // Refetch session
+      const refetched = await prisma.examSession.findUnique({
+        where: { id },
+        include: {
+          exam: {
+            include: {
+              examQuestions: {
+                orderBy: { order: 'asc' },
+                include: {
+                  question: true,
+                },
+              },
+            },
+          },
+          candidate: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              collegeName: true,
+              branch: true,
+              degree: true,
+              yearOfStudy: true,
+              status: true,
+            },
+          },
+          answers: {
+            include: {
+              question: true,
+            },
+          },
+          warnings: true,
+        },
+      });
+      if (refetched) {
+        session = refetched;
+      }
+    }
+  }
+
+  // Construct mock examQuestions from candidate's answers
+  let cleanQuestions = session.answers.map((ans, idx) => {
+    const formatted = formatQuestion(ans.question);
+    if (role === 'CANDIDATE') {
+      const { correctAnswer, explanation, ...safeQuestion } = formatted;
+      return {
+        id: ans.id,
+        examId: session!.examId,
+        questionId: ans.questionId,
+        order: idx + 1,
+        question: safeQuestion,
+      };
+    }
+    return {
+      id: ans.id,
+      examId: session!.examId,
+      questionId: ans.questionId,
+      order: idx + 1,
+      question: formatted,
+    };
+  });
+
+  // Deterministic seeded PRNG (mulberry32) — ensures consistent shuffle per session
+  function seededRng(seed: number) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // Convert session UUID to a numeric seed
+  function uuidToSeed(uuid: string): number {
+    return uuid.replace(/-/g, '').slice(0, 8).split('').reduce((a, c) => a * 31 + c.charCodeAt(0), 0);
+  }
+
+  function seededShuffle<T>(arr: T[], seed: number): T[] {
+    const result = [...arr];
+    const rand = seededRng(seed);
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+
+  const baseSeed = uuidToSeed(session.id);
+
+  if (session.exam.shuffleQuestions) {
+    cleanQuestions = seededShuffle(cleanQuestions, baseSeed);
+  }
+
+  // Shuffle options deterministically per question index
   if (session.exam.shuffleOptions && role === 'CANDIDATE') {
-    cleanExamQuestions.forEach((eq) => {
+    cleanQuestions.forEach((eq, idx) => {
       const q = eq.question as any;
       if (q.options && Array.isArray(q.options)) {
-        q.options = [...q.options].sort(() => 0.5 - Math.random());
+        q.options = seededShuffle(q.options, baseSeed + idx);
       }
     });
   }
@@ -149,13 +300,13 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
   const configuredDomains = Array.from(new Set(allTechnicalQuestions.map((q) => q.domain)));
 
   // Candidate filtering based on domain selection
-  let finalQuestions = cleanExamQuestions;
+  let finalQuestions = cleanQuestions;
   if (role === 'CANDIDATE') {
-    finalQuestions = cleanExamQuestions.filter((eq) => {
+    finalQuestions = cleanQuestions.filter((eq) => {
       const q = eq.question as any;
       if (q.type === 'APTITUDE') return true;
       if (q.type === 'TECHNICAL') {
-        return session.selectedDomain ? q.domain === session.selectedDomain : false;
+        return session!.selectedDomain ? q.domain === session!.selectedDomain : false;
       }
       return false;
     });
@@ -163,6 +314,7 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
 
   return {
     ...session,
+    serverTime: new Date().toISOString(),
     exam: {
       ...session.exam,
       examQuestions: finalQuestions,
@@ -253,18 +405,7 @@ export async function logWarning(
   });
 
   const nextWarningCount = session.warningCount + 1;
-  const reachedLimit = nextWarningCount >= session.exam.maxWarnings;
-
-  let shouldDisqualify = false;
-  let shouldAutoSubmit = false;
-
-  if (reachedLimit) {
-    if (session.exam.autoDisqualifyEnabled) {
-      shouldDisqualify = true;
-    } else {
-      shouldAutoSubmit = true;
-    }
-  }
+  const reachedLimit = nextWarningCount >= 3;
 
   // Update webcam/fullscreen status if warning is relevant
   let webcamStatusUpdate = undefined;
@@ -277,15 +418,14 @@ export async function logWarning(
   }
 
   let updatedSession;
-  if (shouldDisqualify) {
-    updatedSession = await prisma.examSession.update({
+  if (reachedLimit) {
+    // Enforce disqualification immediately
+    await prisma.examSession.update({
       where: { id: sessionId },
       data: {
         warningCount: nextWarningCount,
-        status: 'DISQUALIFIED',
         isDisqualified: true,
-        disqualifyReason: 'Max proctoring warnings exceeded',
-        endedAt: new Date(),
+        disqualifyReason: `Max proctoring warnings exceeded (3 warnings). Last violation: ${input.type}`,
         webcamStatus: webcamStatusUpdate,
         fullscreenStatus: fullscreenStatusUpdate,
       },
@@ -296,20 +436,12 @@ export async function logWarning(
       data: { status: 'DISQUALIFIED' },
     });
 
+    const submitResult = await submitSession(sessionId, effCandidateId, true);
+    updatedSession = submitResult.session;
+
     emitToSession(sessionId, SOCKET_EVENTS.SESSION_DISQUALIFIED, {
-      reason: 'Max proctoring warnings exceeded',
+      reason: `Max proctoring warnings exceeded (3 warnings). Last violation: ${input.type}`,
     });
-  } else if (shouldAutoSubmit) {
-    await prisma.examSession.update({
-      where: { id: sessionId },
-      data: {
-        warningCount: nextWarningCount,
-        webcamStatus: webcamStatusUpdate,
-        fullscreenStatus: fullscreenStatusUpdate,
-      },
-    });
-    const submissionResult = await submitSession(sessionId, effCandidateId, true);
-    updatedSession = submissionResult.session;
   } else {
     updatedSession = await prisma.examSession.update({
       where: { id: sessionId },
@@ -340,16 +472,12 @@ export async function submitSession(sessionId: string, candidateId: string | und
     include: {
       candidate: true,
       warnings: true,
-      exam: {
+      exam: true,
+      answers: {
         include: {
-          examQuestions: {
-            include: {
-              question: true,
-            },
-          },
+          question: true,
         },
       },
-      answers: true,
     },
   });
 
@@ -370,13 +498,25 @@ export async function submitSession(sessionId: string, candidateId: string | und
   let technicalScore = 0;
   let totalMarks = 0;
 
-  const gradingPromises = session.exam.examQuestions.map(async (eq) => {
-    const question = eq.question;
+  const gradingPromises = session.answers.map(async (answer) => {
+    const question = answer.question;
     totalMarks += question.marks;
 
-    const answer = session.answers.find((a) => a.questionId === question.id);
-    if (!answer) {
+    // Check if answered
+    const isAnswered = 
+      (question.format === 'MCQ_SINGLE' || question.format === 'MCQ_MULTIPLE' || question.format === 'TRUE_FALSE')
+        ? (Array.isArray(answer.selectedOptions) && answer.selectedOptions.length > 0)
+        : (question.format === 'CODING' ? !!answer.codeAnswer?.trim() : !!answer.textAnswer?.trim());
+
+    if (!isAnswered) {
       unansweredCount++;
+      await prisma.answer.update({
+        where: { id: answer.id },
+        data: {
+          isCorrect: false,
+          marksAwarded: 0,
+        },
+      });
       return;
     }
 
@@ -429,7 +569,12 @@ export async function submitSession(sessionId: string, candidateId: string | und
 
   const totalScore = aptitudeScore + technicalScore;
   const percentage = totalMarks > 0 ? Math.max(0, (totalScore / totalMarks) * 100) : 0;
-  const status = percentage >= session.exam.passingScorePercent ? 'PASS' : 'FAIL';
+  
+  // Calculate if disqualified
+  const isSessionDisqualified = session.isDisqualified || (session.warningCount >= 3);
+  const status = isSessionDisqualified
+    ? 'DISQUALIFIED'
+    : (percentage >= session.exam.passingScorePercent ? 'PASS' : 'FAIL');
 
   // Create Result record
   const result = await prisma.result.create({
@@ -471,13 +616,16 @@ export async function submitSession(sessionId: string, candidateId: string | und
         message: w.message,
         createdAt: w.createdAt,
       })),
-      isDisqualified: session.isDisqualified,
+      isDisqualified: isSessionDisqualified,
       submissionType: isAutoSubmit ? 'AUTO' : 'MANUAL',
     },
   });
 
   // Update session and candidate status
-  const finalStatus = isAutoSubmit ? 'AUTO_SUBMITTED' : 'SUBMITTED';
+  const finalStatus = isSessionDisqualified
+    ? 'DISQUALIFIED'
+    : (isAutoSubmit ? 'AUTO_SUBMITTED' : 'SUBMITTED');
+
   const updatedSession = await prisma.examSession.update({
     where: { id: sessionId },
     data: {
@@ -488,7 +636,7 @@ export async function submitSession(sessionId: string, candidateId: string | und
 
   await prisma.candidate.update({
     where: { id: effCandidateId },
-    data: { status: 'COMPLETED' },
+    data: { status: isSessionDisqualified ? 'DISQUALIFIED' : 'COMPLETED' },
   });
 
   if (isAutoSubmit) {
@@ -683,90 +831,78 @@ export async function exportResults(res: Response) {
   const worksheet = workbook.addWorksheet('Candidate Results');
 
   worksheet.columns = [
-    { header: 'Candidate Code', key: 'candidateCode', width: 20 },
     { header: 'Name', key: 'name', width: 25 },
     { header: 'Email', key: 'email', width: 30 },
-    { header: 'Phone Number', key: 'phone', width: 20 },
+    { header: 'Mobile', key: 'phone', width: 20 },
     { header: 'College', key: 'college', width: 25 },
-    { header: 'Branch', key: 'branch', width: 20 },
     { header: 'Degree', key: 'degree', width: 15 },
-    { header: 'Year of Study', key: 'yearOfStudy', width: 15 },
-    { header: 'Graduation Year', key: 'year', width: 15 },
-    { header: 'Registration Date & Time', key: 'registrationDate', width: 25 },
-    { header: 'Exam Name', key: 'examName', width: 25 },
+    { header: 'Branch', key: 'branch', width: 20 },
+    { header: 'Registration Time', key: 'registrationDate', width: 25 },
     { header: 'Start Time', key: 'startTime', width: 25 },
     { header: 'End Time', key: 'endTime', width: 25 },
-    { header: 'Duration', key: 'duration', width: 15 },
+    { header: 'Total Duration', key: 'duration', width: 15 },
+    { header: 'Selected Domain', key: 'selectedDomain', width: 20 },
     { header: 'Aptitude Score', key: 'aptitudeScore', width: 15 },
     { header: 'Technical Score', key: 'technicalScore', width: 15 },
     { header: 'Total Score', key: 'totalScore', width: 15 },
     { header: 'Percentage', key: 'percentage', width: 15 },
     { header: 'Pass/Fail', key: 'passFail', width: 15 },
-    { header: 'Session Status', key: 'sessionStatus', width: 20 },
     { header: 'Warning Count', key: 'warningCount', width: 15 },
-    { header: 'Webcam Status', key: 'webcamStatus', width: 15 },
-    { header: 'Microphone Status', key: 'microphoneStatus', width: 18 },
-    { header: 'Fullscreen Status', key: 'fullscreenStatus', width: 18 },
-    { header: 'Violation History', key: 'violations', width: 40 },
+    { header: 'Violation History', key: 'violations', width: 45 },
+    { header: 'Attempt Number', key: 'attemptNumber', width: 15 },
+    { header: 'Disqualified (Yes/No)', key: 'disqualified', width: 20 },
+    { header: 'Status', key: 'status', width: 15 },
   ];
 
   worksheet.getRow(1).font = { bold: true };
 
   for (const r of results) {
-    const candidateCode = r.candidateCode || r.candidate.candidateCode;
     const name = r.candidateName || r.candidate.fullName;
     const email = r.candidateEmail || r.candidate.email;
     const phone = r.candidate.phone || '';
     const college = r.collegeName || r.candidate.collegeName || '';
     const branch = r.branch || r.candidate.branch || '';
     const degree = r.degree || r.candidate.degree || '';
-    const yearOfStudy = r.yearOfStudy || r.candidate.yearOfStudy || '';
-    const year = r.graduationYear || (r.candidate.graduationYear ? String(r.candidate.graduationYear) : '');
     const registrationDate = r.candidate.createdAt ? new Date(r.candidate.createdAt).toLocaleString() : '';
 
-    const examName = r.examName || r.examSession.exam.title;
     const startTime = r.startTime || r.examSession.startedAt;
     const endTime = r.endTime || r.examSession.endedAt;
     const durationSec = r.durationSec || (r.examSession.startedAt && r.examSession.endedAt 
       ? Math.floor((new Date(r.examSession.endedAt).getTime() - new Date(r.examSession.startedAt).getTime()) / 1000)
       : 0);
 
-    const sessionStatus = r.examSession.status;
+    const selectedDomain = r.examSession.selectedDomain || 'None';
     const warningCount = r.warningCount || r.examSession.warningCount;
-    const webcamStatus = r.examSession.webcamStatus || 'INACTIVE';
-    const microphoneStatus = r.examSession.microphoneStatus || 'INACTIVE';
-    const fullscreenStatus = r.examSession.fullscreenStatus || 'INACTIVE';
-
     const violationsList = r.violations
-      ? (r.violations as any[]).map((v) => `${v.type}: ${v.message}`).join('; ')
-      : r.examSession.warnings.map((w) => `${w.type}: ${w.message}`).join('; ');
+      ? (r.violations as any[]).map((v) => `[${v.createdAt ? new Date(v.createdAt).toLocaleTimeString() : ''}] ${v.type}: ${v.message}`).join('; ')
+      : r.examSession.warnings.map((w) => `[${w.createdAt ? new Date(w.createdAt).toLocaleTimeString() : ''}] ${w.type}: ${w.message}`).join('; ');
+
+    const attemptNumber = r.examSession.attemptNumber;
+    const disqualified = r.isDisqualified || r.examSession.isDisqualified ? 'Yes' : 'No';
+    const status = r.examSession.status; // Waiting, Approved, In Progress, Completed, Disqualified
 
     worksheet.addRow({
-      candidateCode,
       name,
       email,
       phone,
       college,
-      branch,
       degree,
-      yearOfStudy,
-      year,
+      branch,
       registrationDate,
-      examName,
       startTime: startTime ? new Date(startTime).toLocaleString() : '',
       endTime: endTime ? new Date(endTime).toLocaleString() : '',
       duration: `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`,
+      selectedDomain,
       aptitudeScore: r.aptitudeScore,
       technicalScore: r.technicalScore,
       totalScore: r.totalScore,
       percentage: `${r.percentage.toFixed(2)}%`,
       passFail: r.status,
-      sessionStatus,
       warningCount,
-      webcamStatus,
-      microphoneStatus,
-      fullscreenStatus,
       violations: violationsList,
+      attemptNumber,
+      disqualified,
+      status,
     });
   }
 
@@ -892,7 +1028,7 @@ export async function approveCandidate(candidateId: string) {
 
   const updated = await prisma.candidate.update({
     where: { id: candidateId },
-    data: { status: 'VERIFIED' },
+    data: { status: 'APPROVED' },
   });
 
   await prisma.auditLog.create({
@@ -965,7 +1101,22 @@ export async function startCandidateExam(candidateId: string) {
 export async function selectDomain(sessionId: string, domain: string) {
   const session = await prisma.examSession.findUnique({
     where: { id: sessionId },
-    include: { exam: { include: { examQuestions: { include: { question: true } } } } },
+    include: {
+      exam: {
+        include: {
+          examQuestions: {
+            include: {
+              question: true,
+            },
+          },
+        },
+      },
+      answers: {
+        include: {
+          question: true,
+        },
+      },
+    },
   });
   if (!session) throw new NotFoundError('Session not found');
 
@@ -978,10 +1129,190 @@ export async function selectDomain(sessionId: string, domain: string) {
     throw new BadRequestError(`Domain '${domain}' is not configured/available for this exam`);
   }
 
+  // 1. Update the domain on the session and set technicalStartedAt
   const updated = await prisma.examSession.update({
     where: { id: sessionId },
-    data: { selectedDomain: domain },
+    data: {
+      selectedDomain: domain,
+      technicalStartedAt: new Date(),
+    },
   });
 
+  // 2. Initialize technical questions for this domain in Answers
+  const hasTechAnswers = session.answers.some(a => a.question.type === 'TECHNICAL');
+  if (!hasTechAnswers) {
+    const techPool = session.exam.examQuestions.filter(
+      (eq) => eq.question.type === 'TECHNICAL' && eq.question.domain === domain
+    );
+    const selectedTech = getRandomSubset(techPool, session.exam.technicalQuestionCount);
+
+    if (selectedTech.length > 0) {
+      await prisma.answer.createMany({
+        data: selectedTech.map((eq) => ({
+          examSessionId: sessionId,
+          candidateId: session.candidateId,
+          questionId: eq.questionId,
+          timeSpentSec: 0,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   return updated;
+}
+
+export async function resetSession(sessionId: string, adminId: string) {
+  const session = await prisma.examSession.findUnique({
+    where: { id: sessionId },
+  });
+  if (!session) throw new NotFoundError('Exam session not found');
+
+  // 1. Delete associated Result if any
+  await prisma.result.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 2. Delete all warnings
+  await prisma.warning.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 3. Delete all answers
+  await prisma.answer.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 4. Update candidate status to APPROVED so they can start again
+  await prisma.candidate.update({
+    where: { id: session.candidateId },
+    data: { status: 'APPROVED' },
+  });
+
+  // 5. Update session status to NOT_STARTED and clear metadata
+  const updatedSession = await prisma.examSession.update({
+    where: { id: sessionId },
+    data: {
+      status: 'NOT_STARTED',
+      startedAt: null,
+      endedAt: null,
+      aptitudeStartedAt: null,
+      aptitudeEndedAt: null,
+      technicalStartedAt: null,
+      technicalEndedAt: null,
+      warningCount: 0,
+      isDisqualified: false,
+      disqualifyReason: null,
+      selectedDomain: null,
+    },
+  });
+
+  // 6. Write audit log
+  await prisma.auditLog.create({
+    data: {
+      action: 'UPDATE',
+      entity: 'EXAM_SESSION',
+      entityId: sessionId,
+      adminId,
+      description: `Exam session for candidate ID ${session.candidateId} reset by admin`,
+    },
+  });
+
+  return updatedSession;
+}
+
+export async function approveAllCandidates(adminId: string) {
+  const pendingCandidates = await prisma.candidate.findMany({
+    where: { status: 'WAITING_APPROVAL' },
+  });
+
+  if (pendingCandidates.length === 0) {
+    return { count: 0 };
+  }
+
+  const candidateIds = pendingCandidates.map((c) => c.id);
+
+  await prisma.candidate.updateMany({
+    where: { id: { in: candidateIds } },
+    data: { status: 'APPROVED' },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'UPDATE',
+      entity: 'CANDIDATE',
+      adminId,
+      description: `Approved all ${pendingCandidates.length} waiting candidates`,
+      metadata: { candidateIds } as any,
+    },
+  });
+
+  return { count: pendingCandidates.length };
+}
+
+export async function allowReattempt(sessionId: string, reason: string | undefined, adminId: string) {
+  const session = await prisma.examSession.findUnique({
+    where: { id: sessionId },
+  });
+  if (!session) throw new NotFoundError('Exam session not found');
+
+  if (session.attemptNumber >= 2) {
+    throw new BadRequestError('Maximum attempts reached. Only one reattempt is allowed.');
+  }
+
+  // 1. Delete associated Result if any
+  await prisma.result.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 2. Delete all warnings
+  await prisma.warning.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 3. Delete all answers
+  await prisma.answer.deleteMany({
+    where: { examSessionId: sessionId },
+  });
+
+  // 4. Update candidate status to APPROVED
+  await prisma.candidate.update({
+    where: { id: session.candidateId },
+    data: { status: 'APPROVED' },
+  });
+
+  // 5. Increment attempt and reset session
+  const nextAttempt = session.attemptNumber + 1;
+  const updatedSession = await prisma.examSession.update({
+    where: { id: sessionId },
+    data: {
+      status: 'NOT_STARTED',
+      startedAt: null,
+      endedAt: null,
+      aptitudeStartedAt: null,
+      aptitudeEndedAt: null,
+      technicalStartedAt: null,
+      technicalEndedAt: null,
+      warningCount: 0,
+      isDisqualified: false,
+      disqualifyReason: null,
+      selectedDomain: null,
+      attemptNumber: nextAttempt,
+      maxAttempts: 2,
+      reattemptReason: reason || 'Granted by administrator',
+    },
+  });
+
+  // 6. Write audit log
+  await prisma.auditLog.create({
+    data: {
+      action: 'UPDATE',
+      entity: 'EXAM_SESSION',
+      entityId: sessionId,
+      adminId,
+      description: `Allowed candidate ID ${session.candidateId} reattempt number ${nextAttempt} (reason: ${reason || 'N/A'})`,
+    },
+  });
+
+  return updatedSession;
 }

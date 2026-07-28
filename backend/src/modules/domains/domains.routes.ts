@@ -8,6 +8,7 @@ export const domainsRouter = Router();
 domainsRouter.get('/public', domainsController.getActiveDomains);
 
 // Admin-only CRUD paths
+domainsRouter.get('/all', requireAuth, requireRole('ADMIN'), domainsController.getAllDomains);
 domainsRouter.get('/', requireAuth, requireRole('ADMIN'), domainsController.getAllDomains);
 domainsRouter.post('/', requireAuth, requireRole('ADMIN'), domainsController.createDomain);
 domainsRouter.put('/:id', requireAuth, requireRole('ADMIN'), domainsController.updateDomain);

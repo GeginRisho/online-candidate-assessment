@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Menu,
   X,
+  Globe,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/auth-provider';
 
@@ -21,6 +22,7 @@ const navItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/questions', label: 'Question Bank', icon: BookOpen },
   { href: '/admin/exams', label: 'Exams', icon: FileSpreadsheet },
+  { href: '/admin/domains', label: 'Domains', icon: Globe },
   { href: '/admin/candidates', label: 'Candidates', icon: Users },
   { href: '/admin/live-proctoring', label: 'Live Proctoring', icon: Camera },
 ];

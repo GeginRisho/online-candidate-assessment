@@ -16,6 +16,7 @@ export interface Exam {
   autoDisqualifyEnabled: boolean;
   requireFullscreen: boolean;
   requireCamera: boolean;
+  requireMicrophone?: boolean;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
   scheduledStart: string | null;
@@ -31,9 +32,14 @@ export interface ExamSession {
   candidateId: string;
   status: 'NOT_STARTED' | 'IN_PROGRESS' | 'PAUSED' | 'SUBMITTED' | 'AUTO_SUBMITTED' | 'DISQUALIFIED' | 'EXPIRED';
   startedAt: string | null;
+  aptitudeStartedAt?: string | null;
+  technicalStartedAt?: string | null;
   endedAt: string | null;
   warningCount: number;
   isDisqualified: boolean;
+  attemptNumber?: number;
+  maxAttempts?: number;
+  reattemptReason?: string | null;
   exam: Exam;
   answers: any[];
   warnings: any[];
@@ -159,5 +165,15 @@ export async function fetchExamByQrToken(qrToken: string): Promise<{
     isActive: boolean;
     totalDurationSec?: number | null;
   }>>(`/exams/public/${qrToken}`);
+  return data.data;
+}
+
+export async function approveAllCandidates(): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>('/exam-sessions/approve-all');
+  return data.data;
+}
+
+export async function allowReattempt(sessionId: string, reason: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/allow-reattempt`, { reason });
   return data.data;
 }

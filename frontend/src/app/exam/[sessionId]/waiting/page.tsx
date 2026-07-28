@@ -31,7 +31,9 @@ export default function CandidateWaitingPage() {
           toast.success('Your assessment is ready! Directing to system check.');
           router.push(`/exam/${sessionId}/system-check`);
         } else if (session.candidate.status === 'DISQUALIFIED') {
-          setErrorMsg('Your registration or session has been disqualified.');
+          setErrorMsg('Your registration or session has been disqualified by the administrator.');
+        } else if (session.candidate.status === 'REJECTED') {
+          setErrorMsg('Your registration has been rejected by the administrator. Please contact support for further assistance.');
         }
       } catch (err) {
         console.error('Error fetching session status:', err);
@@ -115,7 +117,7 @@ export default function CandidateWaitingPage() {
                       <span className="relative inline-flex rounded-full size-2 bg-blue-500"></span>
                     </div>
                     <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                      {candidateStatus === 'VERIFIED' ? 'Approved • Waiting for Exam Start' : 'Awaiting Administrator Approval'}
+                      {candidateStatus === 'APPROVED' || candidateStatus === 'VERIFIED' ? 'Approved • Waiting for Exam Start' : 'Awaiting Administrator Approval'}
                     </span>
                   </div>
                 </>

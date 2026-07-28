@@ -33,7 +33,6 @@ const studentSchema = z.object({
   collegeName: z.string().min(1, 'College name is required').max(200),
   degree: z.string().min(1, 'Degree is required').max(100),
   branch: z.string().min(1, 'Branch is required').max(100),
-  yearOfStudy: z.string().min(1, 'Year of study is required').max(100),
   graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
 });
 
@@ -86,7 +85,6 @@ function RegisterContent() {
       collegeName: '',
       degree: '',
       branch: '',
-      yearOfStudy: '',
     },
   });
 
@@ -100,7 +98,6 @@ function RegisterContent() {
         collegeName: values.collegeName,
         branch: values.branch,
         degree: values.degree,
-        yearOfStudy: values.yearOfStudy,
         graduationYear: values.graduationYear,
         qrRef,
         examId,
@@ -246,32 +243,18 @@ function RegisterContent() {
 
                     <FormField
                       control={form.control}
-                      name="yearOfStudy"
+                      name="graduationYear"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-slate-700 font-medium">Year of Study</FormLabel>
+                          <FormLabel className="text-slate-700 font-medium">Graduation Year (Optional)</FormLabel>
                           <FormControl>
-                            <Input placeholder="3rd Year" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
+                            <Input type="number" placeholder="2026" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} value={field.value ?? ''} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                   </div>
-
-                  <FormField
-                    control={form.control}
-                    name="graduationYear"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-slate-700 font-medium">Graduation Year (Optional)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="2026" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} value={field.value ?? ''} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
 
                   <Button
                     type="submit"

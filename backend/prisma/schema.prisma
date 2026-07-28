@@ -178,6 +178,9 @@ model ExamSession {
   fullscreenStatus   String?           @default("INACTIVE") @map("fullscreen_status")
   currentQuestionNum Int?              @map("current_question_num")
   selectedDomain     String?           @map("selected_domain")
+  attemptNumber      Int               @default(1) @map("attempt_number")
+  maxAttempts        Int               @default(1) @map("max_attempts")
+  reattemptReason    String?           @map("reattempt_reason")
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
   answers            Answer[]

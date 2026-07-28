@@ -45,7 +45,6 @@ export default function ExamPage() {
   // Timers (seconds remaining)
   const [aptitudeTimer, setAptitudeTimer] = React.useState(0);
   const [technicalTimer, setTechnicalTimer] = React.useState(0);
-  const [totalTimer, setTotalTimer] = React.useState<number | null>(null);
   const [showDomainSelection, setShowDomainSelection] = React.useState(false);
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -123,18 +122,14 @@ export default function ExamPage() {
     },
     onSuccess: (data: any) => {
       setWarningCount(data.session.warningCount);
-      toast.warning('Integrity warning logged', {
-        description: `${data.warning.message} (${data.session.warningCount}/${session?.exam?.maxWarnings})`,
-      });
-      if (data.session.status === 'DISQUALIFIED') {
-        toast.error('Session disqualified', { description: 'Exceeded maximum proctor warnings.' });
+      const count = data.session.warningCount;
+      
+      if (count >= 3 || data.session.status === 'DISQUALIFIED') {
+        alert(`Warning ${count} of 3\n\nYou have been disqualified from this assessment.`);
         cleanupProctoring();
         router.push(`/exam/${sessionId}/thank-you`);
-      }
-      if (data.session.status === 'AUTO_SUBMITTED') {
-        toast.error('Exam submitted automatically', { description: 'Exceeded maximum proctor warnings.' });
-        cleanupProctoring();
-        router.push(`/exam/${sessionId}/thank-you`);
+      } else {
+        alert(`Warning ${count} of 3\n\n${data.warning.message}\n\nPlease return to the exam immediately.`);
       }
     },
   });
@@ -232,18 +227,22 @@ export default function ExamPage() {
   React.useEffect(() => {
     const getMedia = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const constraints = {
+          video: !!session?.exam?.requireCamera,
+          audio: !!session?.exam?.requireMicrophone,
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch {
-        toast.error('Camera monitoring stream dropped.');
-        warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam permissions or feed dropped' });
+        toast.error('Media monitoring stream dropped.');
+        warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam/Microphone permissions or feed dropped' });
       }
     };
 
-    if (session?.exam?.requireCamera) {
+    if (session?.exam?.requireCamera || session?.exam?.requireMicrophone) {
       void getMedia();
     }
 
@@ -252,27 +251,40 @@ export default function ExamPage() {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [session?.exam?.requireCamera]);
+  }, [session?.exam?.requireCamera, session?.exam?.requireMicrophone]);
 
-  // Webcam Track end / Device Change listeners
+  // Webcam & Microphone Track end / Device Change listeners
   React.useEffect(() => {
-    if (!session?.exam?.requireCamera || !streamRef.current) return;
+    if (!streamRef.current) return;
 
-    const handleTrackEnded = () => {
-      toast.error('Webcam feed disconnected!');
-      warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam video track ended' });
+    const handleTrackEnded = (e: any) => {
+      const kind = e.target.kind; // 'video' or 'audio'
+      toast.error(`${kind === 'video' ? 'Webcam' : 'Microphone'} feed disconnected!`);
+      warningMutation.mutate({
+        type: 'CAMERA_DISCONNECT',
+        message: `${kind === 'video' ? 'Webcam' : 'Microphone'} video/audio track ended`,
+      });
     };
 
-    const tracks = streamRef.current.getVideoTracks();
+    const tracks = streamRef.current.getTracks();
     tracks.forEach((track) => track.addEventListener('ended', handleTrackEnded));
 
     const handleDeviceChange = async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter((d) => d.kind === 'videoinput');
-        if (videoDevices.length === 0) {
-          toast.error('No video input hardware detected!');
-          warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam hardware disconnected' });
+        if (session?.exam?.requireCamera) {
+          const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+          if (videoDevices.length === 0) {
+            toast.error('No video input hardware detected!');
+            warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam hardware disconnected' });
+          }
+        }
+        if (session?.exam?.requireMicrophone) {
+          const audioDevices = devices.filter((d) => d.kind === 'audioinput');
+          if (audioDevices.length === 0) {
+            toast.error('No audio input hardware detected!');
+            warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Microphone hardware disconnected' });
+          }
         }
       } catch {}
     };
@@ -283,7 +295,7 @@ export default function ExamPage() {
       tracks.forEach((track) => track.removeEventListener('ended', handleTrackEnded));
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
-  }, [session?.exam?.requireCamera, streamRef.current, warningMutation]);
+  }, [session, streamRef.current, warningMutation]);
 
   // Enforce Fullscreen overlay & exit warning log
   React.useEffect(() => {
@@ -335,6 +347,12 @@ export default function ExamPage() {
         e.preventDefault();
         toast.warning('DevTools shortcuts are disabled.');
         warningMutation.mutate({ type: 'DEVTOOLS_OPENED', message: `Pressed Ctrl+Shift+${e.key.toUpperCase()}` });
+      }
+
+      if (isCtrl && e.key.toLowerCase() === 'u') {
+        e.preventDefault();
+        toast.warning('View source code is disabled.');
+        warningMutation.mutate({ type: 'DEVTOOLS_OPENED', message: 'Attempted to view source code (Ctrl+U)' });
       }
     };
 
@@ -410,6 +428,28 @@ export default function ExamPage() {
     };
   }, [session?.status]);
 
+  // Multiple tab detection
+  React.useEffect(() => {
+    if (session?.status !== 'IN_PROGRESS' || !sessionId) return;
+
+    const channel = new BroadcastChannel(`exam_session_${sessionId}`);
+    
+    channel.onmessage = (event) => {
+      if (event.data === 'ping') {
+        warningMutation.mutate({ type: 'OTHER', message: 'Multiple browser tabs detected' });
+        channel.postMessage('pong');
+      } else if (event.data === 'pong') {
+        warningMutation.mutate({ type: 'OTHER', message: 'Multiple browser tabs detected' });
+      }
+    };
+
+    channel.postMessage('ping');
+
+    return () => {
+      channel.close();
+    };
+  }, [session?.status, sessionId, warningMutation]);
+
   // Restore current question index on mount
   React.useEffect(() => {
     if (typeof window !== 'undefined' && questions.length > 0) {
@@ -430,47 +470,38 @@ export default function ExamPage() {
     }
   }, [currentQuestionIndex, sessionId]);
 
+  const serverClientOffsetRef = React.useRef<number>(0);
+
   // Setup timers & hydrate answers with session recovery
   React.useEffect(() => {
     if (!session) return;
 
-    const aptDuration = session.exam?.aptitudeDurationSec || 900;
-    const techDuration = session.exam?.technicalDurationSec || 900;
-    const totalDuration = session.exam?.totalDurationSec;
-    const wc = session.warningCount;
-
-    const startedTime = session.startedAt ? new Date(session.startedAt).getTime() : Date.now();
-    const elapsedTotalSec = Math.floor((Date.now() - startedTime) / 1000);
-
-    if (totalDuration) {
-      if (elapsedTotalSec >= totalDuration) {
-        submitMutation.mutate(true);
-        return;
-      }
-      setTotalTimer(totalDuration - elapsedTotalSec);
-    } else {
-      if (elapsedTotalSec >= aptDuration + techDuration) {
-        submitMutation.mutate(true);
-        return;
-      }
+    const serverTimeStr = (session as any).serverTime;
+    if (serverTimeStr) {
+      serverClientOffsetRef.current = new Date(serverTimeStr).getTime() - Date.now();
     }
 
-    let aptRem = aptDuration;
-    let techRem = techDuration;
-    let currentSection: 'APTITUDE' | 'TECHNICAL' = 'APTITUDE';
+    const aptDuration = session.exam?.aptitudeDurationSec || 900;
+    const techDuration = session.exam?.technicalDurationSec || 900;
+    const wc = session.warningCount;
 
-    if (!totalDuration) {
-      if (elapsedTotalSec < aptDuration) {
-        currentSection = 'APTITUDE';
-        aptRem = aptDuration - elapsedTotalSec;
-        techRem = techDuration;
-      } else {
-        currentSection = 'TECHNICAL';
-        aptRem = 0;
-        techRem = Math.max(0, techDuration - (elapsedTotalSec - aptDuration));
-      }
-    } else {
-      currentSection = session.selectedDomain ? 'TECHNICAL' : 'APTITUDE';
+    const currentServerTime = Date.now() + serverClientOffsetRef.current;
+    
+    let aptRem = aptDuration;
+    if (session.aptitudeStartedAt) {
+      const elapsedApt = Math.floor((currentServerTime - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+      aptRem = Math.max(0, aptDuration - elapsedApt);
+    }
+
+    let techRem = techDuration;
+    if (session.technicalStartedAt) {
+      const elapsedTech = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
+      techRem = Math.max(0, techDuration - elapsedTech);
+    }
+
+    let currentSection: 'APTITUDE' | 'TECHNICAL' = 'APTITUDE';
+    if (session.selectedDomain) {
+      currentSection = 'TECHNICAL';
     }
 
     const answersMap: Record<string, string[]> = {};
@@ -493,18 +524,20 @@ export default function ExamPage() {
       }
     });
 
-    const timer = setTimeout(() => {
-      setAptitudeTimer(aptRem);
-      setTechnicalTimer(techRem);
-      setActiveSection(currentSection);
-      setWarningCount(wc);
-      setSelectedAnswers(answersMap);
-      setCodeAnswers(codeMap);
-      setTextAnswers(textMap);
-      setFlaggedQuestions(flaggedMap);
-    }, 0);
+    setAptitudeTimer(aptRem);
+    setTechnicalTimer(techRem);
+    setActiveSection(currentSection);
+    setWarningCount(wc);
+    setSelectedAnswers(answersMap);
+    setCodeAnswers(codeMap);
+    setTextAnswers(textMap);
+    setFlaggedQuestions(flaggedMap);
 
-    return () => clearTimeout(timer);
+    // If aptitude timer already expired but domain not selected, force domain selection
+    if (currentSection === 'APTITUDE' && aptRem <= 0) {
+      setShowDomainSelection(true);
+      setActiveSection('TECHNICAL');
+    }
   }, [session]);
 
   // Timer tick down
@@ -512,20 +545,28 @@ export default function ExamPage() {
     if (!session || session.status !== 'IN_PROGRESS') return;
 
     const timer = setInterval(() => {
-      if (session.exam?.totalDurationSec) {
-        setTotalTimer((prev) => {
-          if (prev === null) return null;
-          if (prev <= 1) {
-            submitMutation.mutate(true);
-            return 0;
+      const currentServerTime = Date.now() + serverClientOffsetRef.current;
+
+      if (activeSection === 'APTITUDE') {
+        const duration = session.exam?.aptitudeDurationSec || 900;
+        if (session.aptitudeStartedAt) {
+          const elapsed = Math.floor((currentServerTime - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+          const rem = Math.max(0, duration - elapsed);
+          setAptitudeTimer(rem);
+          if (rem <= 0) {
+            setShowDomainSelection(true);
+            setActiveSection('TECHNICAL');
           }
-          return prev - 1;
-        });
+        }
       } else {
-        if (activeSection === 'APTITUDE') {
-          setAptitudeTimer((prev) => Math.max(0, prev - 1));
-        } else {
-          setTechnicalTimer((prev) => Math.max(0, prev - 1));
+        const duration = session.exam?.technicalDurationSec || 900;
+        if (session.technicalStartedAt) {
+          const elapsed = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
+          const rem = Math.max(0, duration - elapsed);
+          setTechnicalTimer(rem);
+          if (rem <= 0) {
+            submitMutation.mutate(true); // Auto-submit when technical timer hits 0
+          }
         }
       }
     }, 1000);
@@ -596,12 +637,25 @@ export default function ExamPage() {
   };
 
   const handleNext = () => {
+    if (activeSection === 'APTITUDE' && currentQuestionIndex === 14) {
+      setShowDomainSelection(true);
+      setActiveSection('TECHNICAL');
+      return;
+    }
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
     }
   };
 
   const handlePrevious = () => {
+    if (activeSection === 'TECHNICAL' && !showDomainSelection) {
+      const techIdx = questions.findIndex((q) => q.type === 'TECHNICAL');
+      if (currentQuestionIndex === techIdx) {
+        // First technical question, clicking back does nothing or toast
+        toast.info('You cannot return to the Aptitude section.');
+        return;
+      }
+    }
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex((prev) => prev - 1);
     }
@@ -609,10 +663,19 @@ export default function ExamPage() {
 
   const handleJumpToSection = (section: 'APTITUDE' | 'TECHNICAL') => {
     if (section === 'APTITUDE') {
+      if (activeSection === 'TECHNICAL') {
+        toast.error('You cannot return to the Aptitude section.');
+        return;
+      }
       setCurrentQuestionIndex(0);
     } else {
       if (!session?.selectedDomain) {
+        if (currentQuestionIndex < 14) {
+          toast.error('Please complete all 15 aptitude questions first.');
+          return;
+        }
         setShowDomainSelection(true);
+        setActiveSection('TECHNICAL');
       } else {
         const techIdx = questions.findIndex((q) => q.type === 'TECHNICAL');
         if (techIdx !== -1) {
@@ -668,19 +731,21 @@ export default function ExamPage() {
         <div className="flex border rounded overflow-hidden text-xs font-semibold bg-muted/30">
           <button
             onClick={() => handleJumpToSection('APTITUDE')}
+            disabled={activeSection === 'TECHNICAL'}
             className={`px-4 py-2 transition-colors ${
-              activeSection === 'APTITUDE' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:text-foreground'
+              activeSection === 'APTITUDE' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:bg-slate-100 disabled:opacity-50'
             }`}
           >
-            Aptitude Section ({questions.filter((q) => q.type === 'APTITUDE').length})
+            Aptitude Section (15 Qs)
           </button>
           <button
             onClick={() => handleJumpToSection('TECHNICAL')}
+            disabled={activeSection === 'APTITUDE' && currentQuestionIndex < 14}
             className={`px-4 py-2 transition-colors ${
-              activeSection === 'TECHNICAL' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:text-foreground'
+              activeSection === 'TECHNICAL' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:bg-slate-100 disabled:opacity-50'
             }`}
           >
-            Technical Section ({questions.filter((q) => q.type === 'TECHNICAL').length})
+            Technical Section {session?.selectedDomain ? `(${session.selectedDomain})` : ''}
           </button>
         </div>
 
@@ -689,9 +754,7 @@ export default function ExamPage() {
           <div className="flex items-center gap-2 font-mono font-semibold text-lg bg-primary/10 text-primary px-3 py-1.5 rounded-lg border border-primary/20">
             <Clock className="size-4 animate-pulse" />
             <span>
-              {exam?.totalDurationSec
-                ? (totalTimer !== null ? formatTimer(totalTimer) : '00:00')
-                : (activeSection === 'APTITUDE' ? formatTimer(aptitudeTimer) : formatTimer(technicalTimer))}
+              {activeSection === 'APTITUDE' ? formatTimer(aptitudeTimer) : formatTimer(technicalTimer)}
             </span>
           </div>
 

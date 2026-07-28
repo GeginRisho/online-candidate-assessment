@@ -18,6 +18,7 @@ import {
   Award,
   Calendar,
   Timer,
+  Play,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,16 +30,19 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { fetchAllCandidateSessionsAdmin } from '@/services';
+import { fetchAllCandidateSessionsAdmin, approveCandidate, rejectCandidate, startCandidateExam } from '@/services';
 import { apiClient } from '@/services/apiClient';
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     NOT_STARTED: 'bg-slate-100 text-slate-600 border border-slate-200',
+    WAITING_APPROVAL: 'bg-amber-50 text-amber-700 border border-amber-200',
+    APPROVED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
     IN_PROGRESS: 'bg-blue-50 text-blue-700 border border-blue-200',
     SUBMITTED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
     AUTO_SUBMITTED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
     DISQUALIFIED: 'bg-red-50 text-red-700 border border-red-200',
+    REJECTED: 'bg-red-50 text-red-700 border border-red-200',
     PAUSED: 'bg-amber-50 text-amber-700 border border-amber-200',
     EXPIRED: 'bg-red-50 text-red-700 border border-red-200',
   };
@@ -135,6 +139,55 @@ export default function CandidatesPage() {
     },
     onError: () => {
       toast.error('Failed to disqualify candidate');
+    },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: approveCandidate,
+    onSuccess: () => {
+      toast.success('Candidate approved successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+      setSelectedSession(null);
+    },
+    onError: (err: any) => {
+      toast.error('Failed to approve candidate: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: rejectCandidate,
+    onSuccess: () => {
+      toast.success('Candidate registration rejected');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+      setSelectedSession(null);
+    },
+    onError: (err: any) => {
+      toast.error('Failed to reject candidate: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const startExamMutation = useMutation({
+    mutationFn: startCandidateExam,
+    onSuccess: () => {
+      toast.success('Exam started for candidate. They will be automatically redirected.');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+      setSelectedSession(null);
+    },
+    onError: (err: any) => {
+      toast.error('Failed to start candidate exam: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: ({ sessionId, reason }: { sessionId: string; reason: string }) =>
+      apiClient.post(`/exam-sessions/${sessionId}/allow-reattempt`, { reason }),
+    onSuccess: () => {
+      toast.success('Candidate re-attempt granted successfully. Progress has been reset.');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+      setSelectedSession(null);
+    },
+    onError: (err: any) => {
+      toast.error('Failed to grant re-attempt: ' + (err.response?.data?.message || err.message));
     },
   });
 
@@ -369,14 +422,46 @@ export default function CandidatesPage() {
             )}
           </DialogHeader>
 
-          {selectedSession && <CandidateDetailsContent session={selectedSession} />}
+          {selectedSession && (
+            <CandidateDetailsContent
+              session={selectedSession}
+              onApprove={(cid) => approveMutation.mutate(cid)}
+              onReject={(cid) => rejectMutation.mutate(cid)}
+              onStartExam={(cid) => startExamMutation.mutate(cid)}
+              onReset={(sid, reason) => resetMutation.mutate({ sessionId: sid, reason })}
+              isApprovePending={approveMutation.isPending}
+              isRejectPending={rejectMutation.isPending}
+              isStartExamPending={startExamMutation.isPending}
+              isResetPending={resetMutation.isPending}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-function CandidateDetailsContent({ session }: { session: any }) {
+function CandidateDetailsContent({
+  session,
+  onApprove,
+  onReject,
+  onStartExam,
+  onReset,
+  isApprovePending,
+  isRejectPending,
+  isStartExamPending,
+  isResetPending,
+}: {
+  session: any;
+  onApprove: (cid: string) => void;
+  onReject: (cid: string) => void;
+  onStartExam: (cid: string) => void;
+  onReset: (sid: string, reason: string) => void;
+  isApprovePending: boolean;
+  isRejectPending: boolean;
+  isStartExamPending: boolean;
+  isResetPending: boolean;
+}) {
   const c = session.candidate;
   const ex = session.exam;
   const result = session.result;
@@ -409,7 +494,7 @@ function CandidateDetailsContent({ session }: { session: any }) {
           <p className="text-xs text-muted-foreground">{c?.email}</p>
           <p className="text-xs text-muted-foreground">Phone: {c?.phone || 'N/A'}</p>
           <p className="text-xs text-muted-foreground">College: {c?.collegeName}</p>
-          <p className="text-xs text-muted-foreground">{c?.degree} — {c?.branch} · Year: {c?.yearOfStudy || 'N/A'} ({c?.graduationYear || 'N/A'})</p>
+          <p className="text-xs text-muted-foreground">{c?.degree} — {c?.branch} · {c?.yearOfStudy ? `Year: ${c.yearOfStudy} · ` : ''}Graduation: {c?.graduationYear || 'N/A'}</p>
           <p className="text-xs text-muted-foreground font-mono">Code: {c?.candidateCode}</p>
         </div>
         <div className="space-y-1">
@@ -427,6 +512,12 @@ function CandidateDetailsContent({ session }: { session: any }) {
             <div className="flex items-center gap-1.5"><Calendar className="size-3" />Start: {startedAt ? startedAt.toLocaleString() : '—'}</div>
             <div className="flex items-center gap-1.5"><Calendar className="size-3" />End: {endedAt ? endedAt.toLocaleString() : '—'}</div>
             <div className="flex items-center gap-1.5"><Timer className="size-3" />Duration: {durationStr}</div>
+            <div className="flex items-center gap-1.5 font-semibold text-slate-700"><Timer className="size-3" />Attempt: {session.attemptNumber ?? 1} / {session.maxAttempts ?? 2}</div>
+            {session.reattemptReason && (
+              <div className="flex items-start gap-1.5 text-amber-700 mt-1 italic leading-relaxed">
+                <span>Reason: {session.reattemptReason}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -505,6 +596,63 @@ function CandidateDetailsContent({ session }: { session: any }) {
           </div>
         )}
       </div>
+
+      {/* Admin Actions Panel */}
+      {['WAITING_APPROVAL', 'REGISTERED', 'APPROVED', 'VERIFIED', 'COMPLETED', 'DISQUALIFIED', 'ABSENT', 'REJECTED', 'SUBMITTED'].includes(c?.status) && (
+        <div className="flex items-center justify-end gap-2 pt-4 border-t border-border mt-6 bg-slate-50 p-4 rounded-xl">
+          {['WAITING_APPROVAL', 'REGISTERED'].includes(c?.status) && (
+            <>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg gap-1.5"
+                onClick={() => onApprove(c.id)}
+                disabled={isApprovePending}
+              >
+                <CheckCircle2 className="size-3.5" />
+                Approve Candidate
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 font-medium text-xs rounded-lg gap-1.5"
+                onClick={() => onReject(c.id)}
+                disabled={isRejectPending}
+              >
+                <XCircle className="size-3.5" />
+                Reject
+              </Button>
+            </>
+          )}
+          {['APPROVED', 'VERIFIED'].includes(c?.status) && (
+            <Button
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg gap-1.5 w-full sm:w-auto"
+              onClick={() => onStartExam(c.id)}
+              disabled={isStartExamPending}
+            >
+              <Play className="size-3.5 fill-current animate-pulse" />
+              Launch Exam / Start Assessment
+            </Button>
+          )}
+          {['COMPLETED', 'DISQUALIFIED', 'ABSENT', 'REJECTED', 'SUBMITTED'].includes(c?.status) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700 font-medium text-xs rounded-lg gap-1.5 w-full sm:w-auto"
+              onClick={() => {
+                const reason = prompt(`Enter reason for granting ${c?.fullName} a re-attempt:`);
+                if (reason !== null) {
+                  onReset(session.id, reason || 'Granted by admin');
+                }
+              }}
+              disabled={isResetPending || (session.attemptNumber >= 2)}
+            >
+              <RefreshCw className="size-3.5" />
+              {session.attemptNumber >= 2 ? 'Reattempt Limit Reached (2/2)' : 'Allow Reattempt'}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
