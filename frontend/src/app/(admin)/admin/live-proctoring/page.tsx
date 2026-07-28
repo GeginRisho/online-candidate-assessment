@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Activity,
@@ -24,30 +24,33 @@ export default function LiveProctoringPage() {
     refetchInterval: 5000, // Poll every 5 seconds for live status updates
   });
 
-  const disqualifyMutation = useMutation({
-    mutationFn: (sessionId: string) =>
-      apiClient.post(`/exam-sessions/${sessionId}/disqualify`, { reason: 'Disqualified by proctor from live console' }),
-    onSuccess: () => {
-      toast.success('Session disqualified');
-      queryClient.invalidateQueries({ queryKey: ['admin-proctoring-sessions'] });
-    },
-  });
-
-  const forceSubmitMutation = useMutation({
-    mutationFn: (sessionId: string) =>
-      apiClient.post(`/exam-sessions/${sessionId}/force-submit`),
-    onSuccess: () => {
-      toast.success('Session force submitted');
-      queryClient.invalidateQueries({ queryKey: ['admin-proctoring-sessions'] });
-    },
-  });
-
   const activeSessions = sessions.filter(
     (s: any) => s.status === 'IN_PROGRESS' || s.status === 'PAUSED'
   );
   const completedSessions = sessions.filter(
     (s: any) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED'
   );
+
+  const handleExport = async () => {
+    try {
+      toast.info('Generating results export... Please wait.');
+      const response = await apiClient.get('/exam-sessions/export', {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'candidate_results.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success('Results spreadsheet downloaded successfully!');
+    } catch (err: any) {
+      toast.error('Failed to export candidate results', {
+        description: err.message || 'Please try again later.',
+      });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -66,9 +69,14 @@ export default function LiveProctoringPage() {
             Real-time candidate session monitoring, integrity alerts, camera feeds, and instant intervention.
           </p>
         </div>
-        <div className="flex items-center gap-2 font-mono text-xs bg-emerald-500/10 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-          <Activity className="size-4 animate-pulse" />
-          <span>Polling Live (5s)</span>
+        <div className="flex items-center gap-4">
+          <Button onClick={handleExport} className="gap-2" variant="outline">
+            Export Candidate Results
+          </Button>
+          <div className="flex items-center gap-2 font-mono text-xs bg-emerald-500/10 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+            <Activity className="size-4 animate-pulse" />
+            <span>Polling Live (5s)</span>
+          </div>
         </div>
       </div>
 
@@ -127,6 +135,20 @@ export default function LiveProctoringPage() {
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {activeSessions.map((s: any) => {
               const c = s.candidate;
+              const isOnline = s.status === 'IN_PROGRESS' && s.lastHeartbeatAt && (Date.now() - new Date(s.lastHeartbeatAt).getTime() < 30000);
+              
+              const totalDurationSec = (s.exam?.aptitudeDurationSec || 0) + (s.exam?.technicalDurationSec || 0);
+              const elapsedSec = s.startedAt ? Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 1000) : 0;
+              const timeRemainingSec = Math.max(0, totalDurationSec - elapsedSec);
+              
+              const formatTimeRemaining = (sec: number) => {
+                if (sec <= 0) return 'Expired';
+                const h = Math.floor(sec / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                const secs = sec % 60;
+                return h > 0 ? `${h}h ${m}m` : `${m}m ${secs}s`;
+              };
+
               return (
                 <Card key={s.id} className="relative overflow-hidden border-border/80 flex flex-col justify-between">
                   <div>
@@ -134,11 +156,24 @@ export default function LiveProctoringPage() {
                     <div className="bg-slate-900 aspect-video relative flex items-center justify-center text-white">
                       <div className="text-center space-y-2">
                         <Camera className="size-8 text-slate-400 mx-auto animate-pulse" />
-                        <p className="text-xs font-mono text-slate-300">Live Camera Feed Active</p>
+                        <p className="text-xs font-mono text-slate-300">
+                          Camera Status: {s.webcamStatus || 'INACTIVE'}
+                        </p>
                       </div>
                       <div className="absolute left-3 top-3 bg-red-500 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded flex items-center gap-1">
                         <span className="size-1.5 rounded-full bg-white animate-ping" />
                         <span>LIVE</span>
+                      </div>
+                      <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+                        <span
+                          className={`size-2.5 rounded-full ${
+                            isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                          }`}
+                          title={isOnline ? 'Online' : 'Offline'}
+                        />
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-black/60 text-white uppercase">
+                          {isOnline ? 'Online' : 'Offline'}
+                        </span>
                       </div>
                     </div>
 
@@ -157,14 +192,42 @@ export default function LiveProctoringPage() {
                         <span>Warnings:</span>
                         <span className="font-bold text-amber-600 flex items-center gap-1">
                           <AlertTriangle className="size-3.5" />
-                          {s.warningCount} / 3
+                          {s.warningCount} / {s.exam?.maxWarnings || 3}
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between">
-                        <span>Started At:</span>
+                        <span>Time Remaining:</span>
+                        <span className={`font-semibold ${timeRemainingSec < 300 ? 'text-red-500 animate-pulse' : 'text-foreground'}`}>
+                          {formatTimeRemaining(timeRemainingSec)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span>Current Question:</span>
+                        <span className="font-semibold text-foreground">
+                          {s.currentQuestionNum ? `Question ${s.currentQuestionNum}` : '—'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span>Webcam Feed:</span>
+                        <span className={`font-semibold ${s.webcamStatus === 'ACTIVE' ? 'text-emerald-600' : s.webcamStatus === 'DISCONNECTED' ? 'text-red-500 animate-pulse' : 'text-slate-400'}`}>
+                          {s.webcamStatus || 'INACTIVE'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span>Fullscreen Lock:</span>
+                        <span className={`font-semibold ${s.fullscreenStatus === 'ACTIVE' ? 'text-emerald-600' : s.fullscreenStatus === 'EXITED' ? 'text-red-500' : 'text-slate-400'}`}>
+                          {s.fullscreenStatus || 'INACTIVE'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span>Heartbeat:</span>
                         <span className="font-mono text-foreground">
-                          {s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : 'Just now'}
+                          {s.lastHeartbeatAt ? new Date(s.lastHeartbeatAt).toLocaleTimeString() : '—'}
                         </span>
                       </div>
                     </CardContent>
@@ -175,9 +238,15 @@ export default function LiveProctoringPage() {
                       variant="outline"
                       size="sm"
                       className="flex-1 text-xs"
-                      onClick={() => {
+                      onClick={async () => {
                         if (confirm(`Force submit exam for ${c?.fullName}?`)) {
-                          forceSubmitMutation.mutate(s.id);
+                          try {
+                            await apiClient.post(`/exam-sessions/${s.id}/force-submit`);
+                            toast.success('Session force submitted');
+                            queryClient.invalidateQueries({ queryKey: ['admin-proctoring-sessions'] });
+                          } catch (err: any) {
+                            toast.error('Failed to force submit: ' + (err.response?.data?.message || err.message));
+                          }
                         }
                       }}
                     >
@@ -188,9 +257,15 @@ export default function LiveProctoringPage() {
                       variant="destructive"
                       size="sm"
                       className="flex-1 text-xs"
-                      onClick={() => {
+                      onClick={async () => {
                         if (confirm(`Disqualify candidate ${c?.fullName}?`)) {
-                          disqualifyMutation.mutate(s.id);
+                          try {
+                            await apiClient.post(`/exam-sessions/${s.id}/disqualify`, { reason: 'Disqualified by proctor from live console' });
+                            toast.success('Session disqualified');
+                            queryClient.invalidateQueries({ queryKey: ['admin-proctoring-sessions'] });
+                          } catch (err: any) {
+                            toast.error('Failed to disqualify: ' + (err.response?.data?.message || err.message));
+                          }
                         }
                       }}
                     >

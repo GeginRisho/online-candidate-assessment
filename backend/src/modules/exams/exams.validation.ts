@@ -8,6 +8,7 @@ export const createExamSchema = z.object({
     title: z.string().min(3, 'Title must be at least 3 characters').max(150),
     description: z.string().max(2000).optional(),
     status: examStatusEnum.default(ExamStatus.DRAFT),
+    isActive: z.boolean().optional(),
     aptitudeDurationSec: z.number().int().min(60, 'Aptitude duration must be at least 60 seconds'),
     technicalDurationSec: z.number().int().min(60, 'Technical duration must be at least 60 seconds'),
     aptitudeQuestionCount: z.number().int().min(0),

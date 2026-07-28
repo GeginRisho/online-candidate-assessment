@@ -1,7 +1,8 @@
 'use client';
 
 
-import { useQuery } from '@tanstack/react-query';
+import * as React from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileText,
   Clock,
@@ -14,12 +15,37 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchExams } from '@/services';
+import { apiClient } from '@/services/apiClient';
+import { toast } from 'sonner';
 
 export default function ExamsPage() {
+  const queryClient = useQueryClient();
+  const [togglingId, setTogglingId] = React.useState<string | null>(null);
+
   const { data: exams = [], isLoading, error, isError } = useQuery({
     queryKey: ['admin-exams'],
     queryFn: fetchExams,
     staleTime: 0,
+  });
+
+  const toggleActivationMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      setTogglingId(id);
+      const { data } = await apiClient.put(`/exams/${id}`, { isActive });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Exam status updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-exams'] });
+    },
+    onError: (error: any) => {
+      toast.error('Failed to update status', {
+        description: error.response?.data?.message || error.message || 'Please try again.',
+      });
+    },
+    onSettled: () => {
+      setTogglingId(null);
+    },
   });
 
   if (isLoading) {
@@ -77,12 +103,12 @@ export default function ExamsPage() {
                   <div className="absolute right-3 top-3">
                     <span
                       className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                        exam.status === 'ACTIVE'
+                        exam.isActive
                           ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                          : 'bg-muted text-muted-foreground'
+                          : 'bg-red-500/10 text-red-600 border border-red-500/20'
                       }`}
                     >
-                      {exam.status}
+                      {exam.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </div>
 
@@ -118,14 +144,24 @@ export default function ExamsPage() {
                   </CardContent>
                 </div>
 
-                <div className="p-6 pt-0 border-t border-border/40 mt-4 flex items-center justify-between">
+                 <div className="p-6 pt-0 border-t border-border/40 mt-4 flex items-center justify-between gap-2">
                   <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
                     <CheckCircle className="size-3.5" />
                     Passing: {exam.passingScorePercent}%
                   </span>
-                  <Button variant="outline" size="sm">
-                    Configure
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant={exam.isActive ? 'destructive' : 'default'}
+                      size="sm"
+                      disabled={toggleActivationMutation.isPending && togglingId === exam.id}
+                      onClick={() => toggleActivationMutation.mutate({ id: exam.id, isActive: !exam.isActive })}
+                    >
+                      {exam.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      Configure
+                    </Button>
+                  </div>
                 </div>
               </Card>
             );

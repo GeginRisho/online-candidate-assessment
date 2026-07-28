@@ -40,7 +40,12 @@ export const logWarning = asyncHandler(async (req: Request, res: Response) => {
     throw new UnauthorizedError('Candidate authentication required');
   }
   const { id } = req.params; // sessionId
-  const result = await sessionsService.logWarning(id, req.user.id, req.body);
+  const browserInfo = req.headers['user-agent'] ? { userAgent: req.headers['user-agent'] } : undefined;
+  const result = await sessionsService.logWarning(id, req.user.id, {
+    ...req.body,
+    browserInfo,
+    ipAddress: req.ip,
+  });
   sendSuccess(res, result, 'Warning logged successfully');
 });
 
@@ -59,7 +64,12 @@ export const heartbeat = asyncHandler(async (req: Request, res: Response) => {
     throw new UnauthorizedError('Candidate authentication required');
   }
   const { id } = req.params; // sessionId
-  const session = await sessionsService.heartbeat(id, req.user.id);
+  const { webcamStatus, fullscreenStatus, currentQuestionNum } = req.body || {};
+  const session = await sessionsService.heartbeat(id, req.user.id, {
+    webcamStatus,
+    fullscreenStatus,
+    currentQuestionNum,
+  });
   sendSuccess(res, session, 'Heartbeat acknowledged');
 });
 
@@ -88,6 +98,21 @@ export const forceSubmitSession = asyncHandler(async (req: Request, res: Respons
   const { id } = req.params; // sessionId
   const result = await sessionsService.forceSubmitSession(id, req.user.id);
   sendSuccess(res, result, 'Candidate session force submitted');
+});
+
+export const exportResults = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  await sessionsService.exportResults(res);
+});
+
+export const exportIndividualResult = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { id } = req.params;
+  await sessionsService.exportIndividualResult(id, res);
 });
 
 export const getAllSessionsAdmin = asyncHandler(async (req: Request, res: Response) => {

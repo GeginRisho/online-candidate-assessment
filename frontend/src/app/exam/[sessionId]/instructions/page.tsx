@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   ArrowLeft,
   Loader2,
+  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -24,10 +25,34 @@ export default function ExamInstructionsPage() {
   const [pledgeChecked, setPledgeChecked] = React.useState(false);
 
   // Fetch session details
-  const { data: session, isLoading } = useQuery({
+  const { data: session, isLoading, error, isError } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => fetchSessionDetails(sessionId),
+    retry: false,
   });
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const channelName = `exam_session_channel_${sessionId}`;
+    const bc = new BroadcastChannel(channelName);
+
+    bc.postMessage({ type: 'CHECK_DUPLICATE' });
+
+    bc.onmessage = (event) => {
+      if (event.data?.type === 'CHECK_DUPLICATE') {
+        bc.postMessage({ type: 'DUPLICATE_RESPONSE' });
+      } else if (event.data?.type === 'DUPLICATE_RESPONSE') {
+        toast.error('Multiple Tabs Detected', {
+          description: 'This exam session is already open in another tab.',
+        });
+        router.replace('/dashboard');
+      }
+    };
+
+    return () => {
+      bc.close();
+    };
+  }, [sessionId, router]);
 
   const handleStartExam = () => {
     if (!pledgeChecked) {
@@ -49,6 +74,28 @@ export default function ExamInstructionsPage() {
       router.push(`/exam/${sessionId}`);
     }
   };
+
+  if (isError) {
+    const errorMsg = (error as any)?.response?.data?.message || error?.message || 'Failed to load session details.';
+    return (
+      <div className="flex min-h-screen flex-col bg-slate-50 items-center justify-center p-6 md:p-8">
+        <Card className="max-w-md w-full border-border/80 shadow-lg text-center p-8 space-y-6 bg-white">
+          <div className="size-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+            <XCircle className="size-8" />
+          </div>
+          <CardTitle className="text-xl font-bold font-display text-destructive">Assessment Error</CardTitle>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {errorMsg.includes('contact') || errorMsg.includes('not available') || errorMsg.includes('active')
+              ? 'Assessment is not available. Please contact the administrator.'
+              : errorMsg}
+          </p>
+          <Button onClick={() => router.push('/dashboard')} className="w-full">
+            Back to Dashboard
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   if (isLoading || !session) {
     return (

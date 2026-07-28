@@ -77,6 +77,48 @@ export default function CandidatesPage() {
   const [search, setSearch] = React.useState('');
   const [selectedSession, setSelectedSession] = React.useState<any>(null);
 
+  const handleDownloadIndividual = async (sessionId: string, candidateName: string) => {
+    try {
+      toast.info(`Generating assessment report for ${candidateName}...`);
+      const response = await apiClient.get(`/exam-sessions/${sessionId}/export`, {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `report_${candidateName.replace(/\s+/g, '_')}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success('Individual report downloaded successfully!');
+    } catch (err: any) {
+      toast.error('Failed to export candidate report', {
+        description: err.message || 'Please try again later.',
+      });
+    }
+  };
+
+  const handleExportAll = async () => {
+    try {
+      toast.info('Generating all candidate results export...');
+      const response = await apiClient.get('/exam-sessions/export', {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'all_candidate_results.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success('All candidate results spreadsheet downloaded!');
+    } catch (err: any) {
+      toast.error('Failed to export all results', {
+        description: err.message || 'Please try again later.',
+      });
+    }
+  };
+
   const { data: sessions = [], isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['admin-candidate-sessions'],
     queryFn: fetchAllCandidateSessionsAdmin,
@@ -111,10 +153,10 @@ export default function CandidatesPage() {
 
   const stats = React.useMemo(() => {
     const total = sessions.length;
-    const submitted = sessions.filter((s: any) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED').length;
-    const inProgress = sessions.filter((s: any) => s.status === 'IN_PROGRESS').length;
-    const notStarted = sessions.filter((s: any) => s.status === 'NOT_STARTED').length;
-    return { total, submitted, inProgress, notStarted };
+    const completed = sessions.filter((s: any) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED').length;
+    const active = sessions.filter((s: any) => s.status === 'IN_PROGRESS' || s.status === 'PAUSED').length;
+    const disqualified = sessions.filter((s: any) => s.status === 'DISQUALIFIED' || s.result?.isDisqualified === true).length;
+    return { total, completed, active, disqualified };
   }, [sessions]);
 
   if (isLoading) {
@@ -144,10 +186,10 @@ export default function CandidatesPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Total', value: stats.total, color: 'text-foreground' },
-          { label: 'Not Started', value: stats.notStarted, color: 'text-slate-600' },
-          { label: 'In Progress', value: stats.inProgress, color: 'text-blue-600' },
-          { label: 'Submitted', value: stats.submitted, color: 'text-emerald-600' },
+          { label: 'Total Candidates', value: stats.total, color: 'text-foreground' },
+          { label: 'Active Candidates', value: stats.active, color: 'text-blue-600' },
+          { label: 'Completed Candidates', value: stats.completed, color: 'text-emerald-600' },
+          { label: 'Disqualified Candidates', value: stats.disqualified, color: 'text-red-600' },
         ].map((s) => (
           <Card key={s.label} className="shadow-sm">
             <CardHeader className="pb-1 pt-4 px-4">
@@ -160,15 +202,21 @@ export default function CandidatesPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by name, email, code, status..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9 h-10 bg-white"
-        />
+      {/* Search & Export Header */}
+      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+        <div className="relative w-full sm:max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by candidate name, code, status, college..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 h-10 bg-white"
+          />
+        </div>
+        <Button onClick={handleExportAll} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shrink-0">
+          <FileSpreadsheet className="size-4" />
+          <span>Export All Results</span>
+        </Button>
       </div>
 
       {/* Table */}
@@ -228,6 +276,14 @@ export default function CandidatesPage() {
                           <div className="flex items-center justify-end gap-2">
                             <Button variant="outline" size="sm" className="gap-1 text-xs h-8" onClick={() => setSelectedSession(s)}>
                               <Eye className="size-3.5" /><span>Details</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1 text-xs h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                              onClick={() => handleDownloadIndividual(s.id, c?.fullName)}
+                            >
+                              <FileSpreadsheet className="size-3.5" /><span>Download</span>
                             </Button>
                             {!isDisqualified && !isSubmitted && (
                               <Button
@@ -292,12 +348,25 @@ export default function CandidatesPage() {
       {/* Details Dialog */}
       <Dialog open={Boolean(selectedSession)} onOpenChange={(open) => !open && setSelectedSession(null)}>
         <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <Users className="size-5 text-primary" />
-              Candidate Assessment Report
-            </DialogTitle>
-            <DialogDescription>Full details for {selectedSession?.candidate?.fullName}</DialogDescription>
+          <DialogHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                <Users className="size-5 text-primary" />
+                Candidate Assessment Report
+              </DialogTitle>
+              <DialogDescription>Full details for {selectedSession?.candidate?.fullName}</DialogDescription>
+            </div>
+            {selectedSession && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 gap-1 text-xs mr-4 shrink-0"
+                onClick={() => handleDownloadIndividual(selectedSession.id, selectedSession.candidate?.fullName)}
+              >
+                <FileSpreadsheet className="size-4" />
+                <span>Export Excel</span>
+              </Button>
+            )}
           </DialogHeader>
 
           {selectedSession && <CandidateDetailsContent session={selectedSession} />}

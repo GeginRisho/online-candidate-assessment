@@ -26,7 +26,11 @@ export const submitSessionSchema = z.object({
 });
 
 export const heartbeatSessionSchema = z.object({
-  body: z.object({}).optional(),
+  body: z.object({
+    webcamStatus: z.string().optional(),
+    fullscreenStatus: z.string().optional(),
+    currentQuestionNum: z.number().int().optional(),
+  }).optional(),
   query: z.object({}).optional(),
   params: z.object({
     id: z.string().uuid('Invalid session ID format'),
@@ -38,6 +42,10 @@ export const warningSessionSchema = z.object({
     type: z.nativeEnum(WarningType),
     severity: z.nativeEnum(WarningSeverity).default(WarningSeverity.MEDIUM),
     message: z.string().min(1, 'Warning message is required'),
+    currentQuestionNum: z.number().int().optional(),
+    fullscreenStatus: z.string().optional(),
+    webcamStatus: z.string().optional(),
+    visibilityState: z.string().optional(),
     metadata: z.record(z.any()).optional(),
   }),
   query: z.object({}).optional(),

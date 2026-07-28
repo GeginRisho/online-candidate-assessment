@@ -37,6 +37,18 @@ sessionsRouter.get(
   sessionsController.getAllSessionsAdmin,
 );
 
+sessionsRouter.get(
+  '/export',
+  requireRole('ADMIN'),
+  sessionsController.exportResults,
+);
+
+sessionsRouter.get(
+  '/:id/export',
+  requireRole('ADMIN'),
+  sessionsController.exportIndividualResult,
+);
+
 // Shared endpoints
 sessionsRouter.get(
   '/:id',

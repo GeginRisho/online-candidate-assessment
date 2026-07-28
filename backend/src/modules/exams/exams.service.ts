@@ -17,10 +17,10 @@ export async function createExam(input: CreateExamInput, adminId: string) {
 
 export async function getExams(role: 'ADMIN' | 'CANDIDATE') {
   if (role === 'CANDIDATE') {
-    // Candidates should only see active or scheduled exams
+    // Candidates should only see active exams
     return prisma.exam.findMany({
       where: {
-        status: { in: ['ACTIVE', 'SCHEDULED'] },
+        isActive: true,
       },
       orderBy: { createdAt: 'desc' },
     });

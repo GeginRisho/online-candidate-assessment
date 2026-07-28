@@ -35,6 +35,12 @@ export default function ExamPage() {
 
   // Proctoring warnings count
   const [warningCount, setWarningCount] = React.useState(0);
+  const [isFullscreenActive, setIsFullscreenActive] = React.useState(true);
+
+  const currentQuestionIndexRef = React.useRef(0);
+  React.useEffect(() => {
+    currentQuestionIndexRef.current = currentQuestionIndex;
+  }, [currentQuestionIndex]);
 
   // Timers (seconds remaining)
   const [aptitudeTimer, setAptitudeTimer] = React.useState(0);
@@ -88,12 +94,24 @@ export default function ExamPage() {
 
   // Log Warning Mutation
   const warningMutation = useMutation({
-    mutationFn: (payload: { type: string; message: string }) =>
-      logWarning(sessionId, {
+    mutationFn: (payload: { type: string; message: string }) => {
+      const webcamStatus = session?.exam?.requireCamera
+        ? (streamRef.current && streamRef.current.getVideoTracks().some(t => t.readyState === 'live') ? 'ACTIVE' : 'DISCONNECTED')
+        : 'INACTIVE';
+      const fullscreenStatus = document.fullscreenElement !== null ? 'ACTIVE' : 'EXITED';
+      const currentQuestionNum = currentQuestionIndexRef.current + 1;
+      const visibilityState = document.visibilityState;
+
+      return logWarning(sessionId, {
         type: payload.type as any,
         message: payload.message,
         severity: 'MEDIUM',
-      }),
+        currentQuestionNum,
+        fullscreenStatus,
+        webcamStatus,
+        visibilityState,
+      });
+    },
     onSuccess: (data: any) => {
       setWarningCount(data.session.warningCount);
       toast.warning('Integrity warning logged', {
@@ -101,6 +119,12 @@ export default function ExamPage() {
       });
       if (data.session.status === 'DISQUALIFIED') {
         toast.error('Session disqualified', { description: 'Exceeded maximum proctor warnings.' });
+        cleanupProctoring();
+        router.push('/dashboard');
+      }
+      if (data.session.status === 'AUTO_SUBMITTED') {
+        toast.error('Exam submitted automatically', { description: 'Exceeded maximum proctor warnings.' });
+        cleanupProctoring();
         router.push('/dashboard');
       }
     },
@@ -119,7 +143,31 @@ export default function ExamPage() {
     },
   });
 
-  // Initialize socket connection
+  // BroadcastChannel duplicate tab prevention
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const channelName = `exam_session_channel_${sessionId}`;
+    const bc = new BroadcastChannel(channelName);
+
+    bc.postMessage({ type: 'CHECK_DUPLICATE' });
+
+    bc.onmessage = (event) => {
+      if (event.data?.type === 'CHECK_DUPLICATE') {
+        bc.postMessage({ type: 'DUPLICATE_RESPONSE' });
+      } else if (event.data?.type === 'DUPLICATE_RESPONSE') {
+        toast.error('Multiple Tabs Detected', {
+          description: 'This exam session is already open in another tab. Closing this instance.',
+        });
+        router.replace('/dashboard');
+      }
+    };
+
+    return () => {
+      bc.close();
+    };
+  }, [sessionId, router]);
+
+  // Initialize socket connection & periodic heartbeat
   React.useEffect(() => {
     let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     if (!socketUrl && process.env.NEXT_PUBLIC_API_URL) {
@@ -146,26 +194,30 @@ export default function ExamPage() {
       router.push('/dashboard');
     });
 
+    socket.on('session:autosubmitted', () => {
+      toast.error('Exam auto-submitted', { description: 'This session has been automatically completed.' });
+      cleanupProctoring();
+      router.push('/dashboard');
+    });
+
     const heartbeatInterval = setInterval(() => {
       if (session?.status === 'IN_PROGRESS') {
-        void heartbeat(sessionId);
+        const webcamStatus = session?.exam?.requireCamera
+          ? (streamRef.current && streamRef.current.getVideoTracks().some(t => t.readyState === 'live') ? 'ACTIVE' : 'DISCONNECTED')
+          : 'INACTIVE';
+        const fullscreenStatus = document.fullscreenElement !== null ? 'ACTIVE' : 'EXITED';
+        const currentQuestionNum = currentQuestionIndexRef.current + 1;
+
+        void heartbeat(sessionId, { webcamStatus, fullscreenStatus, currentQuestionNum });
         socket.emit('candidate:heartbeat', sessionId);
       }
-    }, 15000);
-
-    const handleBlur = () => {
-      if (session?.status === 'IN_PROGRESS') {
-        warningMutation.mutate({ type: 'TAB_SWITCH', message: 'Tab switched / window blur detected' });
-      }
-    };
-    window.addEventListener('blur', handleBlur);
+    }, 5000); // 5 seconds heartbeat interval
 
     return () => {
       clearInterval(heartbeatInterval);
-      window.removeEventListener('blur', handleBlur);
       socket.disconnect();
     };
-  }, [sessionId, session?.status, cleanupProctoring, router, warningMutation]);
+  }, [sessionId, session, cleanupProctoring, router]);
 
   // Setup device feed
   React.useEffect(() => {
@@ -178,6 +230,7 @@ export default function ExamPage() {
         }
       } catch {
         toast.error('Camera monitoring stream dropped.');
+        warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam permissions or feed dropped' });
       }
     };
 
@@ -192,13 +245,211 @@ export default function ExamPage() {
     };
   }, [session?.exam?.requireCamera]);
 
-  // Setup timers & hydrate answers
+  // Webcam Track end / Device Change listeners
+  React.useEffect(() => {
+    if (!session?.exam?.requireCamera || !streamRef.current) return;
+
+    const handleTrackEnded = () => {
+      toast.error('Webcam feed disconnected!');
+      warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam video track ended' });
+    };
+
+    const tracks = streamRef.current.getVideoTracks();
+    tracks.forEach((track) => track.addEventListener('ended', handleTrackEnded));
+
+    const handleDeviceChange = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+        if (videoDevices.length === 0) {
+          toast.error('No video input hardware detected!');
+          warningMutation.mutate({ type: 'CAMERA_DISCONNECT', message: 'Webcam hardware disconnected' });
+        }
+      } catch {}
+    };
+
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+
+    return () => {
+      tracks.forEach((track) => track.removeEventListener('ended', handleTrackEnded));
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [session?.exam?.requireCamera, streamRef.current, warningMutation]);
+
+  // Enforce Fullscreen overlay & exit warning log
+  React.useEffect(() => {
+    if (session?.status !== 'IN_PROGRESS') return;
+
+    const checkFs = () => {
+      const active = document.fullscreenElement !== null;
+      setIsFullscreenActive(active);
+      if (!active) {
+        warningMutation.mutate({ type: 'FULLSCREEN_EXIT', message: 'Exited proctored fullscreen mode' });
+      }
+    };
+
+    document.addEventListener('fullscreenchange', checkFs);
+    setIsFullscreenActive(document.fullscreenElement !== null);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', checkFs);
+    };
+  }, [session?.status, warningMutation]);
+
+  // Disable Right-Click and Copy-Paste-Select Shortcuts
+  React.useEffect(() => {
+    if (session?.status !== 'IN_PROGRESS') return;
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      toast.warning('Right-click is disabled during the exam.');
+      warningMutation.mutate({ type: 'RIGHT_CLICK', message: 'Right-click context menu event' });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrl = e.ctrlKey || e.metaKey;
+
+      if (isCtrl && ['c', 'v', 'x', 'a'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        const type = e.key.toLowerCase() === 'c' ? 'COPY_ATTEMPT' : e.key.toLowerCase() === 'v' ? 'PASTE_ATTEMPT' : 'OTHER';
+        toast.warning('Copy/Paste/Cut/Select-All is disabled during the exam.');
+        warningMutation.mutate({ type, message: `Attempted key combo Ctrl+${e.key.toUpperCase()}` });
+      }
+
+      if (e.key === 'F12') {
+        e.preventDefault();
+        toast.warning('DevTools shortcuts are disabled.');
+        warningMutation.mutate({ type: 'DEVTOOLS_OPENED', message: 'Pressed F12 key' });
+      }
+
+      if (isCtrl && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        toast.warning('DevTools shortcuts are disabled.');
+        warningMutation.mutate({ type: 'DEVTOOLS_OPENED', message: `Pressed Ctrl+Shift+${e.key.toUpperCase()}` });
+      }
+    };
+
+    const preventClipboard = (e: Event) => {
+      e.preventDefault();
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('copy', preventClipboard);
+    document.addEventListener('paste', preventClipboard);
+    document.addEventListener('cut', preventClipboard);
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('copy', preventClipboard);
+      document.removeEventListener('paste', preventClipboard);
+      document.removeEventListener('cut', preventClipboard);
+    };
+  }, [session?.status, warningMutation]);
+
+  // VisibilityChange / PageHide / Window Blur detectors
+  const lastSwitchTimeRef = React.useRef<number>(0);
+  const logSwitchWarning = React.useCallback((type: string, message: string) => {
+    const now = Date.now();
+    if (now - lastSwitchTimeRef.current < 2500) return;
+    lastSwitchTimeRef.current = now;
+    warningMutation.mutate({ type, message });
+  }, [warningMutation]);
+
+  React.useEffect(() => {
+    if (session?.status !== 'IN_PROGRESS') return;
+
+    const handleBlur = () => {
+      logSwitchWarning('WINDOW_BLUR', 'Switched focus away from proctored window');
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        logSwitchWarning('TAB_SWITCH', 'Switched browser tab / hidden visibility');
+      }
+    };
+
+    const handlePageHide = () => {
+      logSwitchWarning('TAB_SWITCH', 'Page hid/unloaded');
+    };
+
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [session?.status, logSwitchWarning]);
+
+  // Warning reload alerts
+  React.useEffect(() => {
+    if (session?.status !== 'IN_PROGRESS') return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Refreshing will log a warning! Are you sure?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [session?.status]);
+
+  // Restore current question index on mount
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && questions.length > 0) {
+      const stored = localStorage.getItem(`current_q_idx_${sessionId}`);
+      if (stored !== null) {
+        const idx = parseInt(stored, 10);
+        if (!isNaN(idx) && idx >= 0 && idx < questions.length) {
+          setCurrentQuestionIndex(idx);
+        }
+      }
+    }
+  }, [sessionId, questions.length]);
+
+  // Persist current question index
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`current_q_idx_${sessionId}`, String(currentQuestionIndex));
+    }
+  }, [currentQuestionIndex, sessionId]);
+
+  // Setup timers & hydrate answers with session recovery
   React.useEffect(() => {
     if (!session) return;
 
     const aptDuration = session.exam?.aptitudeDurationSec || 900;
     const techDuration = session.exam?.technicalDurationSec || 900;
     const wc = session.warningCount;
+
+    const startedTime = session.startedAt ? new Date(session.startedAt).getTime() : Date.now();
+    const elapsedTotalSec = Math.floor((Date.now() - startedTime) / 1000);
+
+    if (elapsedTotalSec >= aptDuration + techDuration) {
+      submitMutation.mutate(true);
+      return;
+    }
+
+    let aptRem = aptDuration;
+    let techRem = techDuration;
+    let currentSection: 'APTITUDE' | 'TECHNICAL' = 'APTITUDE';
+
+    if (elapsedTotalSec < aptDuration) {
+      currentSection = 'APTITUDE';
+      aptRem = aptDuration - elapsedTotalSec;
+      techRem = techDuration;
+    } else {
+      currentSection = 'TECHNICAL';
+      aptRem = 0;
+      techRem = Math.max(0, techDuration - (elapsedTotalSec - aptDuration));
+    }
 
     const answersMap: Record<string, string[]> = {};
     const codeMap: Record<string, string> = {};
@@ -221,8 +472,9 @@ export default function ExamPage() {
     });
 
     const timer = setTimeout(() => {
-      setAptitudeTimer(aptDuration);
-      setTechnicalTimer(techDuration);
+      setAptitudeTimer(aptRem);
+      setTechnicalTimer(techRem);
+      setActiveSection(currentSection);
       setWarningCount(wc);
       setSelectedAnswers(answersMap);
       setCodeAnswers(codeMap);
@@ -247,6 +499,19 @@ export default function ExamPage() {
 
     return () => clearInterval(timer);
   }, [session, activeSection]);
+
+  // Auto submit when time expires
+  React.useEffect(() => {
+    if (!session || session.status !== 'IN_PROGRESS') return;
+
+    if (activeSection === 'APTITUDE' && aptitudeTimer === 0) {
+      setActiveSection('TECHNICAL');
+    }
+
+    if (activeSection === 'TECHNICAL' && technicalTimer === 0) {
+      submitMutation.mutate(true);
+    }
+  }, [activeSection, aptitudeTimer, technicalTimer, session, submitMutation]);
 
   if (isLoading || !session) {
     return (
@@ -328,6 +593,33 @@ export default function ExamPage() {
 
   return (
     <div className="flex h-screen flex-col bg-secondary/10 overflow-hidden font-sans select-none">
+      {/* Fullscreen Overlay Lock */}
+      {!isFullscreenActive && session?.status === 'IN_PROGRESS' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 flex flex-col items-center justify-center text-center p-6 text-white backdrop-blur-sm">
+          <div className="max-w-md space-y-6">
+            <div className="size-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20 animate-pulse">
+              <AlertTriangle className="size-8" />
+            </div>
+            <h2 className="text-2xl font-bold font-display">Fullscreen Mode Required</h2>
+            <p className="text-sm text-slate-300 leading-relaxed">
+              This is a proctored assessment. You cannot access the exam paper or record answers unless the browser is locked in fullscreen mode.
+            </p>
+            <Button
+              onClick={async () => {
+                try {
+                  await document.documentElement.requestFullscreen();
+                } catch {
+                  toast.error('Failed to enter fullscreen. Check browser settings.');
+                }
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-6 text-base font-semibold"
+            >
+              Re-enter Fullscreen Mode
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Header bar */}
       <header className="h-16 border-b border-border bg-card px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">

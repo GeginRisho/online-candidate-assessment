@@ -111,6 +111,7 @@ model Exam {
   title                  String
   description            String?
   status                 ExamStatus     @default(DRAFT)
+  isActive               Boolean        @default(true) @map("is_active")
   aptitudeDurationSec    Int            @map("aptitude_duration_sec")
   technicalDurationSec   Int            @map("technical_duration_sec")
   aptitudeQuestionCount  Int            @map("aptitude_question_count")
@@ -165,6 +166,9 @@ model ExamSession {
   disqualifyReason   String?           @map("disqualify_reason")
   browserInfo        Json?             @map("browser_info")
   ipAddress          String?           @map("ip_address")
+  webcamStatus       String?           @default("INACTIVE") @map("webcam_status")
+  fullscreenStatus   String?           @default("INACTIVE") @map("fullscreen_status")
+  currentQuestionNum Int?              @map("current_question_num")
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
   answers            Answer[]
@@ -207,6 +211,23 @@ model Result {
   id              String       @id @default(uuid())
   examSessionId   String       @unique @map("exam_session_id")
   candidateId     String       @map("candidate_id")
+
+  // Archived Candidate details
+  candidateName   String       @default("") @map("candidate_name")
+  candidateEmail  String       @default("") @map("candidate_email")
+  candidateCode   String       @default("") @map("candidate_code")
+  collegeName     String?      @map("college_name")
+  branch          String?
+  degree          String?
+  graduationYear  Int?         @map("graduation_year")
+
+  // Archived Exam details
+  examName        String       @default("") @map("exam_name")
+  startTime       DateTime?    @map("start_time")
+  endTime         DateTime?    @map("end_time")
+  durationSec     Int          @default(0) @map("duration_sec")
+
+  // Archived Performance & Security details
   aptitudeScore   Float        @default(0) @map("aptitude_score")
   technicalScore  Float        @default(0) @map("technical_score")
   totalScore      Float        @default(0) @map("total_score")
@@ -216,8 +237,12 @@ model Result {
   incorrectCount  Int          @default(0) @map("incorrect_count")
   unansweredCount Int          @default(0) @map("unanswered_count")
   status          ResultStatus @default(PENDING_REVIEW)
-  durationSec     Int          @default(0) @map("duration_sec")
+  warningCount    Int          @default(0) @map("warning_count")
+  violations      Json?
+  isDisqualified  Boolean      @default(false) @map("is_disqualified")
+  submissionType  String       @default("MANUAL") @map("submission_type")
   rank            Int?
+
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
   candidate       Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
@@ -235,6 +260,12 @@ model Warning {
   type          WarningType
   severity      WarningSeverity @default(MEDIUM)
   message       String
+  browserInfo   Json?           @map("browser_info")
+  ipAddress     String?         @map("ip_address")
+  currentQuestionNum Int?            @map("current_question_num")
+  fullscreenStatus   String?         @map("fullscreen_status")
+  webcamStatus       String?         @map("webcam_status")
+  visibilityState    String?         @map("visibility_state")
   metadata      Json?
   createdAt     DateTime        @default(now()) @map("created_at")
   candidate     Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
@@ -348,6 +379,7 @@ enum WarningType {
   SCREEN_SHARE_DETECTED
   PROHIBITED_KEY
   NETWORK_DISCONNECT
+  CAMERA_DISCONNECT
   OTHER
 }
 

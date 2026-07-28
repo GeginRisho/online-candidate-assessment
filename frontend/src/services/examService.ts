@@ -6,6 +6,7 @@ export interface Exam {
   title: string;
   description: string | null;
   status: 'DRAFT' | 'SCHEDULED' | 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
+  isActive: boolean;
   aptitudeDurationSec: number;
   technicalDurationSec: number;
   aptitudeQuestionCount: number;
@@ -79,6 +80,10 @@ export interface LogWarningPayload {
   type: string;
   message: string;
   severity?: string;
+  currentQuestionNum?: number;
+  fullscreenStatus?: string;
+  webcamStatus?: string;
+  visibilityState?: string;
   metadata?: any;
 }
 
@@ -92,7 +97,10 @@ export async function submitSession(sessionId: string, isAutoSubmit = false): Pr
   return data.data;
 }
 
-export async function heartbeat(sessionId: string): Promise<any> {
-  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/heartbeat`);
+export async function heartbeat(
+  sessionId: string,
+  payload?: { webcamStatus?: string; fullscreenStatus?: string; currentQuestionNum?: number }
+): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/heartbeat`, payload);
   return data.data;
 }
