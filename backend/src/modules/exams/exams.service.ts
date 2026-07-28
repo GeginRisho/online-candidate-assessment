@@ -1,7 +1,8 @@
 import { prisma } from '@config/prisma';
-import { NotFoundError } from '@utils/AppError';
+import { NotFoundError, BadRequestError } from '@utils/AppError';
 import type { CreateExamInput, UpdateExamInput } from './exams.validation';
 import { formatQuestion } from '@utils/formatQuestion';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function createExam(input: CreateExamInput, adminId: string) {
   const { scheduledStart, scheduledEnd, ...rest } = input;
@@ -76,4 +77,40 @@ export async function deleteExam(id: string) {
   return prisma.exam.delete({
     where: { id },
   });
+}
+
+export async function generateQrToken(id: string) {
+  await getExamById(id);
+  const qrToken = uuidv4();
+  return prisma.exam.update({
+    where: { id },
+    data: { qrToken },
+  });
+}
+
+export async function getExamByQrToken(qrToken: string) {
+  const exam = await prisma.exam.findUnique({
+    where: { qrToken },
+  });
+  if (!exam) throw new NotFoundError('Exam with the provided QR token was not found');
+
+  if (!exam.registrationOpen) {
+    throw new BadRequestError('Registration for this assessment is closed.');
+  }
+
+  const now = new Date();
+  if (exam.qrActiveAt && now < new Date(exam.qrActiveAt)) {
+    throw new BadRequestError('This assessment link is not active yet.');
+  }
+  if (exam.qrExpiresAt && now > new Date(exam.qrExpiresAt)) {
+    throw new BadRequestError('This assessment link has expired.');
+  }
+
+  return {
+    id: exam.id,
+    title: exam.title,
+    description: exam.description,
+    isActive: exam.isActive,
+    totalDurationSec: exam.totalDurationSec,
+  };
 }

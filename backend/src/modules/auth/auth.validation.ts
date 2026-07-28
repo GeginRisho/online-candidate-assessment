@@ -20,17 +20,20 @@ export const adminLoginSchema = z.object({
 export const candidateRegisterSchema = z.object({
   body: z.object({
     email: z.string().email('Enter a valid email address').toLowerCase(),
-    password: passwordSchema,
     fullName: z.string().min(2, 'Full name is too short').max(120),
     phone: z
       .string()
       .regex(/^\+?[0-9]{7,15}$/, 'Enter a valid phone number')
-      .optional(),
-    collegeName: z.string().max(200).optional(),
-    degree: z.string().max(100).optional(),
-    branch: z.string().max(100).optional(),
+      .optional()
+      .or(z.literal('')),
+    collegeName: z.string().max(200).optional().or(z.literal('')),
+    degree: z.string().max(100).optional().or(z.literal('')),
+    branch: z.string().max(100).optional().or(z.literal('')),
+    yearOfStudy: z.string().max(100).optional().or(z.literal('')),
     graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
     qrRef: z.string().max(200).optional(), // opaque reference captured from a scanned QR poster
+    examId: z.string().uuid().optional(),
+    examToken: z.string().optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),

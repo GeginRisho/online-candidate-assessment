@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload, getAccessToken } from '@/services';
+import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload, selectDomain } from '@/services';
 import { parseQuestionOptions } from '@/utils/questionUtils';
 
 export default function ExamPage() {
@@ -45,6 +45,8 @@ export default function ExamPage() {
   // Timers (seconds remaining)
   const [aptitudeTimer, setAptitudeTimer] = React.useState(0);
   const [technicalTimer, setTechnicalTimer] = React.useState(0);
+  const [totalTimer, setTotalTimer] = React.useState<number | null>(null);
+  const [showDomainSelection, setShowDomainSelection] = React.useState(false);
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
@@ -60,7 +62,7 @@ export default function ExamPage() {
   }, []);
 
   // Fetch session details
-  const { data: session, isLoading } = useQuery({
+  const { data: session, isLoading, refetch } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => fetchSessionDetails(sessionId),
   });
@@ -71,6 +73,13 @@ export default function ExamPage() {
     [exam?.examQuestions]
   );
   const activeQuestion = questions[currentQuestionIndex] || questions[0];
+
+  // Trigger Domain selection modal when candidate starts technical round and hasn't chosen one
+  React.useEffect(() => {
+    if (session && !session.selectedDomain && activeSection === 'TECHNICAL') {
+      setShowDomainSelection(true);
+    }
+  }, [session, activeSection]);
 
   // Auto update visited status & active section tab based on current question
   React.useEffect(() => {
@@ -120,12 +129,12 @@ export default function ExamPage() {
       if (data.session.status === 'DISQUALIFIED') {
         toast.error('Session disqualified', { description: 'Exceeded maximum proctor warnings.' });
         cleanupProctoring();
-        router.push('/dashboard');
+        router.push(`/exam/${sessionId}/thank-you`);
       }
       if (data.session.status === 'AUTO_SUBMITTED') {
         toast.error('Exam submitted automatically', { description: 'Exceeded maximum proctor warnings.' });
         cleanupProctoring();
-        router.push('/dashboard');
+        router.push(`/exam/${sessionId}/thank-you`);
       }
     },
   });
@@ -136,7 +145,7 @@ export default function ExamPage() {
     onSuccess: () => {
       toast.success('Exam submitted successfully!');
       cleanupProctoring();
-      router.push('/dashboard');
+      router.push(`/exam/${sessionId}/thank-you`);
     },
     onError: () => {
       toast.error('Failed to submit exam. Please try again.');
@@ -158,7 +167,7 @@ export default function ExamPage() {
         toast.error('Multiple Tabs Detected', {
           description: 'This exam session is already open in another tab. Closing this instance.',
         });
-        router.replace('/dashboard');
+        router.replace(`/exam/${sessionId}/waiting`);
       }
     };
 
@@ -178,7 +187,7 @@ export default function ExamPage() {
     }
     const socket = io(socketUrl, {
       auth: {
-        token: getAccessToken() || undefined,
+        sessionId,
       },
     });
 
@@ -191,13 +200,13 @@ export default function ExamPage() {
     socket.on('session:disqualified', () => {
       toast.error('Disqualified by proctor', { description: 'This session has been disqualified.' });
       cleanupProctoring();
-      router.push('/dashboard');
+      router.push(`/exam/${sessionId}/thank-you`);
     });
 
     socket.on('session:autosubmitted', () => {
       toast.error('Exam auto-submitted', { description: 'This session has been automatically completed.' });
       cleanupProctoring();
-      router.push('/dashboard');
+      router.push(`/exam/${sessionId}/thank-you`);
     });
 
     const heartbeatInterval = setInterval(() => {
@@ -427,28 +436,41 @@ export default function ExamPage() {
 
     const aptDuration = session.exam?.aptitudeDurationSec || 900;
     const techDuration = session.exam?.technicalDurationSec || 900;
+    const totalDuration = session.exam?.totalDurationSec;
     const wc = session.warningCount;
 
     const startedTime = session.startedAt ? new Date(session.startedAt).getTime() : Date.now();
     const elapsedTotalSec = Math.floor((Date.now() - startedTime) / 1000);
 
-    if (elapsedTotalSec >= aptDuration + techDuration) {
-      submitMutation.mutate(true);
-      return;
+    if (totalDuration) {
+      if (elapsedTotalSec >= totalDuration) {
+        submitMutation.mutate(true);
+        return;
+      }
+      setTotalTimer(totalDuration - elapsedTotalSec);
+    } else {
+      if (elapsedTotalSec >= aptDuration + techDuration) {
+        submitMutation.mutate(true);
+        return;
+      }
     }
 
     let aptRem = aptDuration;
     let techRem = techDuration;
     let currentSection: 'APTITUDE' | 'TECHNICAL' = 'APTITUDE';
 
-    if (elapsedTotalSec < aptDuration) {
-      currentSection = 'APTITUDE';
-      aptRem = aptDuration - elapsedTotalSec;
-      techRem = techDuration;
+    if (!totalDuration) {
+      if (elapsedTotalSec < aptDuration) {
+        currentSection = 'APTITUDE';
+        aptRem = aptDuration - elapsedTotalSec;
+        techRem = techDuration;
+      } else {
+        currentSection = 'TECHNICAL';
+        aptRem = 0;
+        techRem = Math.max(0, techDuration - (elapsedTotalSec - aptDuration));
+      }
     } else {
-      currentSection = 'TECHNICAL';
-      aptRem = 0;
-      techRem = Math.max(0, techDuration - (elapsedTotalSec - aptDuration));
+      currentSection = session.selectedDomain ? 'TECHNICAL' : 'APTITUDE';
     }
 
     const answersMap: Record<string, string[]> = {};
@@ -490,10 +512,21 @@ export default function ExamPage() {
     if (!session || session.status !== 'IN_PROGRESS') return;
 
     const timer = setInterval(() => {
-      if (activeSection === 'APTITUDE') {
-        setAptitudeTimer((prev) => Math.max(0, prev - 1));
+      if (session.exam?.totalDurationSec) {
+        setTotalTimer((prev) => {
+          if (prev === null) return null;
+          if (prev <= 1) {
+            submitMutation.mutate(true);
+            return 0;
+          }
+          return prev - 1;
+        });
       } else {
-        setTechnicalTimer((prev) => Math.max(0, prev - 1));
+        if (activeSection === 'APTITUDE') {
+          setAptitudeTimer((prev) => Math.max(0, prev - 1));
+        } else {
+          setTechnicalTimer((prev) => Math.max(0, prev - 1));
+        }
       }
     }, 1000);
 
@@ -502,7 +535,7 @@ export default function ExamPage() {
 
   // Auto submit when time expires
   React.useEffect(() => {
-    if (!session || session.status !== 'IN_PROGRESS') return;
+    if (!session || session.status !== 'IN_PROGRESS' || session.exam?.totalDurationSec) return;
 
     if (activeSection === 'APTITUDE' && aptitudeTimer === 0) {
       setActiveSection('TECHNICAL');
@@ -578,9 +611,13 @@ export default function ExamPage() {
     if (section === 'APTITUDE') {
       setCurrentQuestionIndex(0);
     } else {
-      const techIdx = questions.findIndex((q) => q.type === 'TECHNICAL');
-      if (techIdx !== -1) {
-        setCurrentQuestionIndex(techIdx);
+      if (!session?.selectedDomain) {
+        setShowDomainSelection(true);
+      } else {
+        const techIdx = questions.findIndex((q) => q.type === 'TECHNICAL');
+        if (techIdx !== -1) {
+          setCurrentQuestionIndex(techIdx);
+        }
       }
     }
   };
@@ -652,7 +689,9 @@ export default function ExamPage() {
           <div className="flex items-center gap-2 font-mono font-semibold text-lg bg-primary/10 text-primary px-3 py-1.5 rounded-lg border border-primary/20">
             <Clock className="size-4 animate-pulse" />
             <span>
-              {activeSection === 'APTITUDE' ? formatTimer(aptitudeTimer) : formatTimer(technicalTimer)}
+              {exam?.totalDurationSec
+                ? (totalTimer !== null ? formatTimer(totalTimer) : '00:00')
+                : (activeSection === 'APTITUDE' ? formatTimer(aptitudeTimer) : formatTimer(technicalTimer))}
             </span>
           </div>
 
@@ -669,7 +708,58 @@ export default function ExamPage() {
       <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
         {/* Left Side: Question paper sheet */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 flex flex-col justify-between bg-background">
-          {activeQuestion ? (
+          {showDomainSelection ? (
+            <div className="space-y-6 max-w-3xl w-full mx-auto py-8">
+              <div className="text-center space-y-4">
+                <div className="size-14 bg-blue-500/10 text-blue-600 rounded-full flex items-center justify-center mx-auto border border-blue-500/20">
+                  <ShieldCheck className="size-8" />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-slate-900 leading-tight">
+                    Select Your Technical Specialization
+                  </h2>
+                  <p className="text-slate-500 text-sm leading-relaxed max-w-md mx-auto">
+                    Please select one of the specialization tracks below. You will be served technical questions matching your choice. Once selected, this track cannot be changed.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 pt-6">
+                {(session?.configuredDomains && session.configuredDomains.length > 0
+                  ? session.configuredDomains
+                  : ['Java Full Stack', 'Python Full Stack', 'MERN Stack', 'Data Science']
+                ).map((dom: string) => (
+                  <button
+                    key={dom}
+                    onClick={async () => {
+                      try {
+                        await selectDomain(sessionId, dom);
+                        toast.success(`Track selected: ${dom}`);
+                        setShowDomainSelection(false);
+                        await refetch();
+                        setActiveSection('TECHNICAL');
+                      } catch (err) {
+                        toast.error('Unable to set domain specialization');
+                      }
+                    }}
+                    className="p-5 border border-slate-200 rounded-2xl bg-card hover:bg-blue-50/50 hover:border-blue-500 text-left transition-all duration-300 group shadow-sm flex flex-col justify-between"
+                  >
+                    <div>
+                      <h4 className="font-semibold text-sm text-slate-900 group-hover:text-blue-600 transition-colors">
+                        {dom}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                        Access technical questions and exercises specifically for the {dom} track.
+                      </p>
+                    </div>
+                    <span className="text-blue-600 font-semibold text-xs mt-4 inline-flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                      Select Track &rarr;
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : activeQuestion ? (
             <div className="space-y-6 max-w-3xl w-full mx-auto">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-muted-foreground">
@@ -766,43 +856,55 @@ export default function ExamPage() {
           )}
 
           {/* Navigation buttons */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-5 max-w-3xl w-full mx-auto mt-6">
-            <div className="flex gap-2">
-              <Button variant="outline" disabled={currentQuestionIndex === 0} onClick={handlePrevious}>
-                <ChevronLeft className="size-4" />
-                <span>Previous</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={toggleFlagReview}
-                className={flaggedQuestions[activeQuestion?.id] ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' : ''}
-              >
-                <Flag className="size-4" />
-                <span>{flaggedQuestions[activeQuestion?.id] ? 'Flagged' : 'Flag for Review'}</span>
-              </Button>
-            </div>
-
-            <div className="flex gap-3">
-              {currentQuestionIndex === questions.length - 1 ? (
+          {!showDomainSelection && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-5 max-w-3xl w-full mx-auto mt-6">
+              <div className="flex gap-2">
+                <Button variant="outline" disabled={currentQuestionIndex === 0} onClick={handlePrevious}>
+                  <ChevronLeft className="size-4" />
+                  <span>Previous</span>
+                </Button>
                 <Button
-                  onClick={() => {
-                    if (confirm('Are you sure you want to submit your final exam responses?')) {
-                      submitMutation.mutate(false);
-                    }
-                  }}
-                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  variant="outline"
+                  onClick={toggleFlagReview}
+                  className={flaggedQuestions[activeQuestion?.id] ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' : ''}
                 >
-                  <span>Submit Exam</span>
-                  <CheckCircle className="size-4" />
+                  <Flag className="size-4" />
+                  <span>{flaggedQuestions[activeQuestion?.id] ? 'Flagged' : 'Flag for Review'}</span>
                 </Button>
-              ) : (
-                <Button onClick={handleNext}>
-                  <span>Next</span>
-                  <ChevronRight className="size-4" />
-                </Button>
-              )}
+              </div>
+
+              <div className="flex gap-3">
+                {currentQuestionIndex === questions.length - 1 ? (
+                  activeSection === 'APTITUDE' ? (
+                    <Button
+                      onClick={() => setShowDomainSelection(true)}
+                      className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <span>Proceed to Technical Section</span>
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() => {
+                        if (confirm('Are you sure you want to submit your final exam responses?')) {
+                          submitMutation.mutate(false);
+                        }
+                      }}
+                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      <span>Submit Exam</span>
+                      <CheckCircle className="size-4" />
+                    </Button>
+                  )
+                ) : (
+                  <Button onClick={handleNext}>
+                    <span>Next</span>
+                    <ChevronRight className="size-4" />
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </main>
 
         {/* Right Side: Palette and Video Stream */}
@@ -814,38 +916,44 @@ export default function ExamPage() {
             </div>
 
             {/* 1-50 Question Palette Grid */}
-            <div className="grid grid-cols-5 gap-2 max-h-[320px] overflow-y-auto pr-1">
-              {questions.map((q: any, i: number) => {
-                const isCurrent = currentQuestionIndex === i;
-                const isAnswered =
-                  (selectedAnswers[q.id] || []).length > 0 ||
-                  Boolean(codeAnswers[q.id]) ||
-                  Boolean(textAnswers[q.id]);
-                const isFlagged = Boolean(flaggedQuestions[q.id]);
-                const isVisited = Boolean(visitedQuestions[q.id]);
+            {!showDomainSelection ? (
+              <div className="grid grid-cols-5 gap-2 max-h-[320px] overflow-y-auto pr-1">
+                {questions.map((q: any, i: number) => {
+                  const isCurrent = currentQuestionIndex === i;
+                  const isAnswered =
+                    (selectedAnswers[q.id] || []).length > 0 ||
+                    Boolean(codeAnswers[q.id]) ||
+                    Boolean(textAnswers[q.id]);
+                  const isFlagged = Boolean(flaggedQuestions[q.id]);
+                  const isVisited = Boolean(visitedQuestions[q.id]);
 
-                let colorStyle = 'bg-muted text-muted-foreground hover:bg-secondary font-medium'; // Gray = Not Visited
-                if (isCurrent) {
-                  colorStyle = 'bg-blue-600 text-white font-bold ring-2 ring-blue-600 ring-offset-2'; // Blue = Current
-                } else if (isFlagged) {
-                  colorStyle = 'bg-amber-500 text-white font-bold'; // Yellow = Review
-                } else if (isAnswered) {
-                  colorStyle = 'bg-emerald-600 text-white font-bold'; // Green = Answered
-                } else if (isVisited) {
-                  colorStyle = 'bg-red-500 text-white font-bold'; // Red = Visited but Unanswered
-                }
+                  let colorStyle = 'bg-muted text-muted-foreground hover:bg-secondary font-medium'; // Gray = Not Visited
+                  if (isCurrent) {
+                    colorStyle = 'bg-blue-600 text-white font-bold ring-2 ring-blue-600 ring-offset-2'; // Blue = Current
+                  } else if (isFlagged) {
+                    colorStyle = 'bg-amber-500 text-white font-bold'; // Yellow = Review
+                  } else if (isAnswered) {
+                    colorStyle = 'bg-emerald-600 text-white font-bold'; // Green = Answered
+                  } else if (isVisited) {
+                    colorStyle = 'bg-red-500 text-white font-bold'; // Red = Visited but Unanswered
+                  }
 
-                return (
-                  <button
-                    key={q.id || i}
-                    onClick={() => setCurrentQuestionIndex(i)}
-                    className={`h-9 w-full rounded flex items-center justify-center font-bold text-xs transition-colors ${colorStyle}`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={q.id || i}
+                      onClick={() => setCurrentQuestionIndex(i)}
+                      className={`h-9 w-full rounded flex items-center justify-center font-bold text-xs transition-colors ${colorStyle}`}
+                    >
+                      {i + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center p-6 border border-dashed rounded-xl bg-slate-50 text-muted-foreground text-xs leading-relaxed">
+                Please select your specialization track to view the question palette.
+              </div>
+            )}
 
             {/* Color Legend */}
             <div className="grid grid-cols-2 gap-2 text-[11px] font-medium border-t border-border pt-4 text-muted-foreground">

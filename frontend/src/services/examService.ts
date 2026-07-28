@@ -20,6 +20,8 @@ export interface Exam {
   shuffleOptions: boolean;
   scheduledStart: string | null;
   scheduledEnd: string | null;
+  qrToken?: string | null;
+  totalDurationSec?: number | null;
   examQuestions?: any[];
 }
 
@@ -35,6 +37,19 @@ export interface ExamSession {
   exam: Exam;
   answers: any[];
   warnings: any[];
+  selectedDomain?: string | null;
+  microphoneStatus?: string | null;
+  configuredDomains?: string[];
+  candidate: {
+    id: string;
+    email: string;
+    fullName: string;
+    collegeName?: string | null;
+    branch?: string | null;
+    degree?: string | null;
+    yearOfStudy?: string | null;
+    status: string;
+  };
 }
 
 export async function fetchExams(): Promise<Exam[]> {
@@ -99,8 +114,50 @@ export async function submitSession(sessionId: string, isAutoSubmit = false): Pr
 
 export async function heartbeat(
   sessionId: string,
-  payload?: { webcamStatus?: string; fullscreenStatus?: string; currentQuestionNum?: number }
+  payload?: { webcamStatus?: string; microphoneStatus?: string; fullscreenStatus?: string; currentQuestionNum?: number }
 ): Promise<any> {
   const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/heartbeat`, payload);
+  return data.data;
+}
+
+export async function approveCandidate(candidateId: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/candidates/${candidateId}/approve`);
+  return data.data;
+}
+
+export async function rejectCandidate(candidateId: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/candidates/${candidateId}/reject`);
+  return data.data;
+}
+
+export async function startCandidateExam(candidateId: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/candidates/${candidateId}/start-exam`);
+  return data.data;
+}
+
+export async function selectDomain(sessionId: string, domain: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/select-domain`, { domain });
+  return data.data;
+}
+
+export async function regenerateExamQrToken(examId: string): Promise<Exam> {
+  const { data } = await apiClient.post<ApiSuccessResponse<Exam>>(`/exams/${examId}/qr`);
+  return data.data;
+}
+
+export async function fetchExamByQrToken(qrToken: string): Promise<{
+  id: string;
+  title: string;
+  description: string;
+  isActive: boolean;
+  totalDurationSec?: number | null;
+}> {
+  const { data } = await apiClient.get<ApiSuccessResponse<{
+    id: string;
+    title: string;
+    description: string;
+    isActive: boolean;
+    totalDurationSec?: number | null;
+  }>>(`/exams/public/${qrToken}`);
   return data.data;
 }

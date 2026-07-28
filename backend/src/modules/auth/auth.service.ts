@@ -12,9 +12,9 @@ import {
   verifyRefreshToken,
   UserRole,
 } from '@utils/jwt';
-import { ConflictError, ForbiddenError, UnauthorizedError, NotFoundError } from '@utils/AppError';
+import { ConflictError, ForbiddenError, UnauthorizedError, NotFoundError, BadRequestError } from '@utils/AppError';
 import { v4 as uuidv4 } from 'uuid';
-import type { AdminLoginInput, AdminRegisterInput, CandidateLoginInput, CandidateRegisterInput } from './auth.validation';
+import type { AdminLoginInput, AdminRegisterInput } from './auth.validation';
 
 export interface RequestMeta {
   ipAddress?: string;
@@ -160,34 +160,111 @@ export async function adminRegister(input: AdminRegisterInput, meta: RequestMeta
 // Candidate auth
 // ---------------------------------------------------------------------------
 
-export async function candidateRegister(input: CandidateRegisterInput, meta: RequestMeta) {
-  const existing = await prisma.candidate.findUnique({ where: { email: input.email } });
-  if (existing) {
-    throw new ConflictError('An account with this email already exists');
+export async function candidateRegister(input: any, meta: RequestMeta) {
+  let examId = input.examId;
+
+  if (!examId && input.examToken) {
+    const exam = await prisma.exam.findUnique({
+      where: { qrToken: input.examToken },
+    });
+    if (!exam) {
+      throw new NotFoundError('Exam not found for the provided QR link');
+    }
+    examId = exam.id;
   }
 
-  const [passwordHash, candidateCode] = await Promise.all([
-    hashPassword(input.password),
-    generateCandidateCode(),
-  ]);
+  if (!examId) {
+    throw new BadRequestError('Exam ID or QR Link token is required to register');
+  }
 
-  const candidate = await prisma.candidate.create({
-    data: {
-      email: input.email,
-      passwordHash,
-      fullName: input.fullName,
-      phone: input.phone,
-      collegeName: input.collegeName,
-      degree: input.degree,
-      branch: input.branch,
-      graduationYear: input.graduationYear,
-      candidateCode,
-      status: 'REGISTERED',
-      metadata: input.qrRef ? { registeredViaQr: input.qrRef } : undefined,
-    },
+  // Verify that the exam exists
+  const exam = await prisma.exam.findUnique({ where: { id: examId } });
+  if (!exam) {
+    throw new NotFoundError('Exam not found');
+  }
+
+  let candidate = await prisma.candidate.findFirst({
+    where: {
+      OR: [
+        { email: input.email },
+        { phone: input.phone }
+      ]
+    }
   });
 
-  const tokens = await issueTokenPair(candidate.id, 'CANDIDATE', candidate.email, meta);
+  if (candidate) {
+    // Check if there is an existing session for this candidate and this exam
+    const existingSession = await prisma.examSession.findUnique({
+      where: { examId_candidateId: { examId, candidateId: candidate.id } },
+    });
+
+    if (existingSession) {
+      const completedStatuses = ['SUBMITTED', 'AUTO_SUBMITTED', 'DISQUALIFIED', 'EXPIRED'];
+      if (completedStatuses.includes(existingSession.status) || ['COMPLETED', 'DISQUALIFIED'].includes(candidate.status)) {
+        throw new BadRequestError('You have already registered or completed this assessment. Multiple attempts are not allowed.');
+      }
+      if (candidate.status === 'REJECTED') {
+        throw new BadRequestError('Your registration has been rejected by the administrator.');
+      }
+    }
+    
+    // Otherwise update their details and set status to WAITING_APPROVAL
+    candidate = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        fullName: input.fullName,
+        phone: input.phone || null,
+        collegeName: input.collegeName || null,
+        branch: input.branch || null,
+        degree: input.degree || null,
+        yearOfStudy: input.yearOfStudy || null,
+        status: 'WAITING_APPROVAL',
+      },
+    });
+  } else {
+    const candidateCode = await generateCandidateCode();
+    candidate = await prisma.candidate.create({
+      data: {
+        email: input.email,
+        fullName: input.fullName,
+        phone: input.phone || null,
+        collegeName: input.collegeName || null,
+        branch: input.branch || null,
+        degree: input.degree || null,
+        yearOfStudy: input.yearOfStudy || null,
+        candidateCode,
+        status: 'WAITING_APPROVAL',
+      },
+    });
+  }
+
+  // Find or create ExamSession in NOT_STARTED state
+  let session = await prisma.examSession.findUnique({
+    where: { examId_candidateId: { examId, candidateId: candidate.id } },
+  });
+
+  if (!session) {
+    session = await prisma.examSession.create({
+      data: {
+        examId,
+        candidateId: candidate.id,
+        status: 'NOT_STARTED',
+      },
+    });
+  } else {
+    // Reset session status if they re-register or resume from waiting
+    const keepSessionStatuses = ['SUBMITTED', 'AUTO_SUBMITTED', 'DISQUALIFIED', 'EXPIRED'];
+    if (!keepSessionStatuses.includes(session.status)) {
+      session = await prisma.examSession.update({
+        where: { id: session.id },
+        data: {
+          status: 'NOT_STARTED',
+          startedAt: null,
+          endedAt: null,
+        },
+      });
+    }
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -195,16 +272,16 @@ export async function candidateRegister(input: CandidateRegisterInput, meta: Req
       entity: 'CANDIDATE',
       entityId: candidate.id,
       candidateId: candidate.id,
-      description: `Candidate ${candidate.email} registered${input.qrRef ? ' via QR' : ''}`,
+      description: `Candidate ${candidate.email} registered for exam ${examId}`,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     },
   });
 
-  logger.info({ candidateId: candidate.id }, 'New candidate registered');
+  logger.info({ candidateId: candidate.id, examId }, 'Candidate registered successfully');
 
   return {
-    tokens,
+    sessionId: session.id,
     user: {
       id: candidate.id,
       email: candidate.email,
@@ -215,57 +292,12 @@ export async function candidateRegister(input: CandidateRegisterInput, meta: Req
       collegeName: candidate.collegeName,
       degree: candidate.degree,
       branch: candidate.branch,
-      graduationYear: candidate.graduationYear,
+      yearOfStudy: candidate.yearOfStudy,
     },
   };
 }
 
-export async function candidateLogin(input: CandidateLoginInput, meta: RequestMeta) {
-  const candidate = await prisma.candidate.findUnique({ where: { email: input.email } });
 
-  if (!candidate || !candidate.passwordHash) {
-    throw new UnauthorizedError('Invalid email or password');
-  }
-
-  const validPassword = await comparePassword(input.password, candidate.passwordHash);
-  if (!validPassword) {
-    throw new UnauthorizedError('Invalid email or password');
-  }
-
-  if (candidate.status === 'DISQUALIFIED') {
-    throw new ForbiddenError('This account has been disqualified and cannot log in');
-  }
-
-  const tokens = await issueTokenPair(candidate.id, 'CANDIDATE', candidate.email, meta);
-
-  await prisma.auditLog.create({
-    data: {
-      action: 'LOGIN',
-      entity: 'CANDIDATE',
-      entityId: candidate.id,
-      candidateId: candidate.id,
-      description: `Candidate ${candidate.email} logged in`,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    },
-  });
-
-  return {
-    tokens,
-    user: {
-      id: candidate.id,
-      email: candidate.email,
-      fullName: candidate.fullName,
-      candidateCode: candidate.candidateCode,
-      status: candidate.status,
-      phone: candidate.phone,
-      collegeName: candidate.collegeName,
-      degree: candidate.degree,
-      branch: candidate.branch,
-      graduationYear: candidate.graduationYear,
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // QR Registration

@@ -42,20 +42,11 @@ export const adminRegister = asyncHandler(async (req: Request, res: Response) =>
 
 
 export const candidateRegister = asyncHandler(async (req: Request, res: Response) => {
-  const { tokens, user } = await authService.candidateRegister(req.body, getRequestMeta(req));
-
-  setRefreshTokenCookie(res, tokens.refreshToken, tokens.refreshTokenExpiresAt.getTime() - Date.now());
-
-  sendSuccess(res, { accessToken: tokens.accessToken, user }, 'Registration successful', 201);
+  const result = await authService.candidateRegister(req.body, getRequestMeta(req));
+  sendSuccess(res, result, 'Registration successful', 201);
 });
 
-export const candidateLogin = asyncHandler(async (req: Request, res: Response) => {
-  const { tokens, user } = await authService.candidateLogin(req.body, getRequestMeta(req));
 
-  setRefreshTokenCookie(res, tokens.refreshToken, tokens.refreshTokenExpiresAt.getTime() - Date.now());
-
-  sendSuccess(res, { accessToken: tokens.accessToken, user }, 'Login successful');
-});
 
 export const getQrRegistration = asyncHandler(async (req: Request, res: Response) => {
   const examId = req.query.examId as string | undefined;

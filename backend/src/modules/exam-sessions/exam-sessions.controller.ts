@@ -5,14 +5,16 @@ import { UnauthorizedError } from '@utils/AppError';
 import * as sessionsService from './exam-sessions.service';
 
 export const startSession = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user || req.user.role !== 'CANDIDATE') {
-    throw new UnauthorizedError('Candidate authorization required');
+  // Candidate registration starts the session, but we keep this for compatibility
+  const candidateId = req.user?.id || req.body.candidateId;
+  if (!candidateId) {
+    throw new UnauthorizedError('Candidate identity required');
   }
   const { examId } = req.body;
   const browserInfo = req.headers['user-agent'] ? { userAgent: req.headers['user-agent'] } : undefined;
   const session = await sessionsService.startSession(
     examId,
-    req.user.id,
+    candidateId,
     req.ip,
     browserInfo,
   );
@@ -20,28 +22,22 @@ export const startSession = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const getSessionById = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user) throw new UnauthorizedError('Authentication required');
   const { id } = req.params;
-  const session = await sessionsService.getSessionDetails(id, req.user.role);
+  const role = req.user?.role || 'CANDIDATE';
+  const session = await sessionsService.getSessionDetails(id, role);
   sendSuccess(res, session, 'Session retrieved successfully');
 });
 
 export const saveAnswer = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user || req.user.role !== 'CANDIDATE') {
-    throw new UnauthorizedError('Candidate authentication required');
-  }
   const { id } = req.params; // sessionId
-  const answer = await sessionsService.saveAnswer(id, req.user.id, req.body);
+  const answer = await sessionsService.saveAnswer(id, req.user?.id, req.body);
   sendSuccess(res, answer, 'Answer saved successfully');
 });
 
 export const logWarning = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user || req.user.role !== 'CANDIDATE') {
-    throw new UnauthorizedError('Candidate authentication required');
-  }
   const { id } = req.params; // sessionId
   const browserInfo = req.headers['user-agent'] ? { userAgent: req.headers['user-agent'] } : undefined;
-  const result = await sessionsService.logWarning(id, req.user.id, {
+  const result = await sessionsService.logWarning(id, req.user?.id, {
     ...req.body,
     browserInfo,
     ipAddress: req.ip,
@@ -50,23 +46,18 @@ export const logWarning = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const submitSession = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user || req.user.role !== 'CANDIDATE') {
-    throw new UnauthorizedError('Candidate authentication required');
-  }
   const { id } = req.params; // sessionId
   const isAutoSubmit = req.body.isAutoSubmit === true;
-  const result = await sessionsService.submitSession(id, req.user.id, isAutoSubmit);
+  const result = await sessionsService.submitSession(id, req.user?.id, isAutoSubmit);
   sendSuccess(res, result, 'Exam submitted successfully');
 });
 
 export const heartbeat = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user || req.user.role !== 'CANDIDATE') {
-    throw new UnauthorizedError('Candidate authentication required');
-  }
   const { id } = req.params; // sessionId
-  const { webcamStatus, fullscreenStatus, currentQuestionNum } = req.body || {};
-  const session = await sessionsService.heartbeat(id, req.user.id, {
+  const { webcamStatus, microphoneStatus, fullscreenStatus, currentQuestionNum } = req.body || {};
+  const session = await sessionsService.heartbeat(id, req.user?.id, {
     webcamStatus,
+    microphoneStatus,
     fullscreenStatus,
     currentQuestionNum,
   });
@@ -121,4 +112,38 @@ export const getAllSessionsAdmin = asyncHandler(async (req: Request, res: Respon
   }
   const sessions = await sessionsService.getAllSessionsAdmin();
   sendSuccess(res, sessions, 'All candidate sessions retrieved');
+});
+
+export const approveCandidate = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { candidateId } = req.params;
+  const result = await sessionsService.approveCandidate(candidateId);
+  sendSuccess(res, result, 'Candidate approved successfully');
+});
+
+export const rejectCandidate = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { candidateId } = req.params;
+  const result = await sessionsService.rejectCandidate(candidateId);
+  sendSuccess(res, result, 'Candidate rejected successfully');
+});
+
+export const startCandidateExam = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { candidateId } = req.params;
+  const result = await sessionsService.startCandidateExam(candidateId);
+  sendSuccess(res, result, 'Exam started for candidate');
+});
+
+export const selectDomain = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { domain } = req.body;
+  const result = await sessionsService.selectDomain(id, domain);
+  sendSuccess(res, result, 'Domain selected successfully');
 });

@@ -35,3 +35,15 @@ export const deleteExam = asyncHandler(async (req: Request, res: Response) => {
   await examsService.deleteExam(id);
   sendSuccess(res, null, 'Exam deleted successfully');
 });
+
+export const generateQrToken = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const exam = await examsService.generateQrToken(id);
+  sendSuccess(res, exam, 'Exam QR token generated/regenerated successfully');
+});
+
+export const getExamByQrToken = asyncHandler(async (req: Request, res: Response) => {
+  const { qrToken } = req.params;
+  const exam = await examsService.getExamByQrToken(qrToken);
+  sendSuccess(res, exam, 'Exam details retrieved successfully');
+});

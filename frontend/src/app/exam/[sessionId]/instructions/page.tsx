@@ -45,7 +45,7 @@ export default function ExamInstructionsPage() {
         toast.error('Multiple Tabs Detected', {
           description: 'This exam session is already open in another tab.',
         });
-        router.replace('/dashboard');
+        router.replace('/');
       }
     };
 
@@ -89,8 +89,8 @@ export default function ExamInstructionsPage() {
               ? 'Assessment is not available. Please contact the administrator.'
               : errorMsg}
           </p>
-          <Button onClick={() => router.push('/dashboard')} className="w-full">
-            Back to Dashboard
+          <Button onClick={() => router.push('/')} className="w-full">
+            Return to Landing Page
           </Button>
         </Card>
       </div>
@@ -113,7 +113,7 @@ export default function ExamInstructionsPage() {
       <Card className="max-w-2xl w-full border-border/80 shadow-lg">
         <CardHeader className="border-b border-border/50 pb-4">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => router.push('/dashboard')}>
+            <Button variant="ghost" size="icon" onClick={() => router.push('/')}>
               <ArrowLeft className="size-4" />
             </Button>
             <div>
@@ -130,12 +130,20 @@ export default function ExamInstructionsPage() {
               <Clock className="size-5 text-primary shrink-0 mt-0.5" />
               <div>
                 <h4 className="font-semibold text-sm">Exam Duration</h4>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Aptitude: <strong>{Math.round(exam.aptitudeDurationSec / 60)} mins</strong>
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Technical: <strong>{Math.round(exam.technicalDurationSec / 60)} mins</strong>
-                </p>
+                {exam.totalDurationSec ? (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Total Time: <strong>{Math.round(exam.totalDurationSec / 60)} mins</strong>
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Aptitude: <strong>{Math.round(exam.aptitudeDurationSec / 60)} mins</strong>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Technical: <strong>{Math.round(exam.technicalDurationSec / 60)} mins</strong>
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -200,7 +208,7 @@ export default function ExamInstructionsPage() {
         </CardContent>
 
         <CardFooter className="border-t border-border/50 pt-4 flex gap-4">
-          <Button variant="outline" className="flex-1" onClick={() => router.push('/dashboard')}>
+          <Button variant="outline" className="flex-1" onClick={() => router.push('/')}>
             Cancel
           </Button>
           <Button disabled={!pledgeChecked} onClick={handleStartExam} className="flex-1 gap-2">

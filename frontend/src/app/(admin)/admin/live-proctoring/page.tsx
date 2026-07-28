@@ -218,6 +218,13 @@ export default function LiveProctoringPage() {
                       </div>
 
                       <div className="flex items-center justify-between">
+                        <span>Microphone Status:</span>
+                        <span className={`font-semibold ${s.microphoneStatus === 'ACTIVE' ? 'text-emerald-600' : s.microphoneStatus === 'MUTED' || s.microphoneStatus === 'DISCONNECTED' ? 'text-red-500 animate-pulse' : 'text-slate-400'}`}>
+                          {s.microphoneStatus || 'INACTIVE'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
                         <span>Fullscreen Lock:</span>
                         <span className={`font-semibold ${s.fullscreenStatus === 'ACTIVE' ? 'text-emerald-600' : s.fullscreenStatus === 'EXITED' ? 'text-red-500' : 'text-slate-400'}`}>
                           {s.fullscreenStatus || 'INACTIVE'}

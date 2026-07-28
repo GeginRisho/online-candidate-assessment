@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Eye, EyeOff, UserPlus, ShieldAlert, Loader2 } from 'lucide-react';
+import { UserPlus, ShieldAlert, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -19,37 +19,23 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Card, CardContent } from '@/components/ui/card';
-import { candidateRegister, getApiErrorMessage } from '@/services';
+import { candidateRegister, fetchExamByQrToken, getApiErrorMessage } from '@/services';
 import { useAuth } from '@/components/providers/auth-provider';
 
-// Password Validation Schema
-const passwordSchema = z
-  .string()
-  .min(8, 'Password must be at least 8 characters')
-  .regex(/[a-z]/, 'Include a lowercase letter')
-  .regex(/[A-Z]/, 'Include an uppercase letter')
-  .regex(/[0-9]/, 'Include a number');
-
 // Student Registration Zod Schema
-const studentSchema = z
-  .object({
-    fullName: z.string().min(2, 'Enter your full name').max(120),
-    email: z.string().email('Enter a valid email address'),
-    phone: z
-      .string()
-      .regex(/^\+?[0-9]{7,15}$/, 'Enter a valid phone number')
-      .optional()
-      .or(z.literal('')),
-    collegeName: z.string().max(200).optional().or(z.literal('')),
-    branch: z.string().max(100).optional().or(z.literal('')),
-    graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
-    password: passwordSchema,
-    confirmPassword: z.string(),
-  })
-  .refine((data) => data.password === data.confirmPassword, {
-    message: "Passwords don't match",
-    path: ['confirmPassword'],
-  });
+const studentSchema = z.object({
+  fullName: z.string().min(2, 'Enter your full name').max(120),
+  email: z.string().email('Enter a valid email address'),
+  phone: z
+    .string()
+    .regex(/^\+?[0-9]{7,15}$/, 'Enter a valid phone number')
+    .min(1, 'Phone number is required'),
+  collegeName: z.string().min(1, 'College name is required').max(200),
+  degree: z.string().min(1, 'Degree is required').max(100),
+  branch: z.string().min(1, 'Branch is required').max(100),
+  yearOfStudy: z.string().min(1, 'Year of study is required').max(100),
+  graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
+});
 
 type StudentFormValues = z.infer<typeof studentSchema>;
 
@@ -57,24 +43,39 @@ function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qrRef = searchParams.get('ref') ?? undefined;
+  const token = searchParams.get('token') ?? undefined;
   const examId = searchParams.get('examId') ?? undefined;
 
-  const { user, isAuthenticated, isLoading: isAuthLoading, setUser } = useAuth();
-  const [showPassword, setShowPassword] = React.useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
+  const { user, isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [examTitle, setExamTitle] = React.useState<string>('');
+  const [loadingExam, setLoadingExam] = React.useState(true);
 
-  // Auto redirect if already authenticated
+  // Load exam details dynamically via token or examId
   React.useEffect(() => {
-    if (!isAuthLoading && isAuthenticated && user) {
-      if (user.userType === 'ADMIN') {
-        router.replace('/admin/dashboard');
-      } else {
-        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
-        router.replace(dest);
+    async function loadExam() {
+      if (token) {
+        try {
+          const details = await fetchExamByQrToken(token);
+          setExamTitle(details.title);
+        } catch (err) {
+          console.error(err);
+          toast.error('Unable to fetch exam details for this token');
+        }
+      } else if (examId) {
+        setExamTitle('Assessment Drive');
       }
+      setLoadingExam(false);
     }
-  }, [isAuthenticated, user, isAuthLoading, examId, router]);
+    loadExam();
+  }, [token, examId]);
+
+  // Auto redirect if Admin is already logged in
+  React.useEffect(() => {
+    if (!isAuthLoading && isAuthenticated && user && user.userType === 'ADMIN') {
+      router.replace('/admin/dashboard');
+    }
+  }, [isAuthenticated, user, isAuthLoading, router]);
 
   const form = useForm<StudentFormValues>({
     resolver: zodResolver(studentSchema),
@@ -83,31 +84,34 @@ function RegisterContent() {
       email: '',
       phone: '',
       collegeName: '',
+      degree: '',
       branch: '',
-      password: '',
-      confirmPassword: '',
+      yearOfStudy: '',
     },
   });
 
   async function onSubmit(values: StudentFormValues) {
     setIsSubmitting(true);
     try {
-      const candidate = await candidateRegister({
+      const response = await candidateRegister({
         email: values.email,
-        password: values.password,
         fullName: values.fullName,
-        phone: values.phone || undefined,
-        collegeName: values.collegeName || undefined,
-        branch: values.branch || undefined,
-        graduationYear: values.graduationYear || undefined,
+        phone: values.phone,
+        collegeName: values.collegeName,
+        branch: values.branch,
+        degree: values.degree,
+        yearOfStudy: values.yearOfStudy,
+        graduationYear: values.graduationYear,
         qrRef,
+        examId,
+        examToken: token,
       });
-      setUser({ ...candidate, userType: 'CANDIDATE' });
+
       toast.success('Registration successful!', {
-        description: `Your candidate code is ${candidate.candidateCode}.`,
+        description: 'Waiting for administrator approval.',
       });
-      const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
-      router.push(dest);
+
+      router.push(`/exam/${response.sessionId}/waiting`);
     } catch (error) {
       toast.error('Registration failed', {
         description: getApiErrorMessage(error),
@@ -128,11 +132,6 @@ function RegisterContent() {
             </div>
             <span>AssessPlatform</span>
           </Link>
-          <div className="flex items-center gap-4">
-            <Link href={examId ? `/login?examId=${examId}` : '/login'} className="text-sm font-medium text-slate-600 hover:text-slate-900">
-              Already have an account? Sign in
-            </Link>
-          </div>
         </div>
       </header>
 
@@ -141,16 +140,20 @@ function RegisterContent() {
         <div className="w-full max-w-[480px]">
           {/* Header */}
           <div className="mb-8 text-center">
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-900">
-              Register as Student
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+              Candidate Registration
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              Fill in your details below to create your candidate profile.
+              {loadingExam ? (
+                <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3.5 animate-spin" /> Loading assessment details...</span>
+              ) : (
+                examTitle ? `Registering for: ${examTitle}` : 'Fill in your details below to begin the assessment.'
+              )}
             </p>
           </div>
 
           {/* Form Card */}
-          <Card className="border-slate-100 shadow-sm rounded-xl">
+          <Card className="border-slate-100 shadow-lg rounded-2xl bg-white">
             <CardContent className="pt-6">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
@@ -159,9 +162,9 @@ function RegisterContent() {
                     name="fullName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-slate-700">Full Name</FormLabel>
+                        <FormLabel className="text-slate-700 font-medium">Full Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="Ananya Verma" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} />
+                          <Input placeholder="Ananya Verma" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -173,9 +176,9 @@ function RegisterContent() {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-slate-700">Email Address</FormLabel>
+                        <FormLabel className="text-slate-700 font-medium">Email Address</FormLabel>
                         <FormControl>
-                          <Input type="email" placeholder="ananya@example.com" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} />
+                          <Input type="email" placeholder="ananya@example.com" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -187,9 +190,9 @@ function RegisterContent() {
                     name="phone"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-slate-700">Phone Number</FormLabel>
+                        <FormLabel className="text-slate-700 font-medium">Mobile Number</FormLabel>
                         <FormControl>
-                          <Input placeholder="+91 98765 43210" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} />
+                          <Input placeholder="+91 98765 43210" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -202,9 +205,9 @@ function RegisterContent() {
                       name="collegeName"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-slate-700">College / University</FormLabel>
+                          <FormLabel className="text-slate-700 font-medium">College Name</FormLabel>
                           <FormControl>
-                            <Input placeholder="BITS Pilani" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} />
+                            <Input placeholder="BITS Pilani" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -216,9 +219,39 @@ function RegisterContent() {
                       name="branch"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-slate-700">Department / Branch</FormLabel>
+                          <FormLabel className="text-slate-700 font-medium">Branch / Stream</FormLabel>
                           <FormControl>
-                            <Input placeholder="Computer Science" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} />
+                            <Input placeholder="Computer Science" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="degree"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-slate-700 font-medium">Degree</FormLabel>
+                          <FormControl>
+                            <Input placeholder="B.Tech" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="yearOfStudy"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-slate-700 font-medium">Year of Study</FormLabel>
+                          <FormControl>
+                            <Input placeholder="3rd Year" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -231,63 +264,9 @@ function RegisterContent() {
                     name="graduationYear"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-slate-700">Graduation Year</FormLabel>
+                        <FormLabel className="text-slate-700 font-medium">Graduation Year (Optional)</FormLabel>
                         <FormControl>
-                          <Input type="number" placeholder="2026" className="border-slate-200 focus-visible:ring-blue-600 rounded-lg" {...field} value={field.value ?? ''} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-slate-700">Password</FormLabel>
-                        <FormControl>
-                          <div className="relative">
-                            <Input
-                              type={showPassword ? 'text' : 'password'}
-                              className="pr-10 border-slate-200 focus-visible:ring-blue-600 rounded-lg"
-                              {...field}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword((v) => !v)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                            >
-                              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                            </button>
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="confirmPassword"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-slate-700">Confirm Password</FormLabel>
-                        <FormControl>
-                          <div className="relative">
-                            <Input
-                              type={showConfirmPassword ? 'text' : 'password'}
-                              className="pr-10 border-slate-200 focus-visible:ring-blue-600 rounded-lg"
-                              {...field}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowConfirmPassword((v) => !v)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                            >
-                              {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                            </button>
-                          </div>
+                          <Input type="number" placeholder="2026" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -296,27 +275,16 @@ function RegisterContent() {
 
                   <Button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors mt-2 rounded-lg"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors mt-4 rounded-xl"
                     loading={isSubmitting}
                   >
                     <UserPlus className="size-4 mr-2" />
-                    Register as Student
+                    Register for Assessment
                   </Button>
                 </form>
               </Form>
             </CardContent>
           </Card>
-
-          {/* Footer Link */}
-          <p className="mt-6 text-center text-sm text-slate-500">
-            Already have an account?{' '}
-            <Link
-              href={examId ? `/login?examId=${examId}` : '/login'}
-              className="font-medium text-blue-600 hover:underline"
-            >
-              Sign in
-            </Link>
-          </p>
         </div>
       </main>
 

@@ -2,12 +2,10 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import {
   Eye,
@@ -15,10 +13,6 @@ import {
   LogIn,
   ShieldAlert,
   Loader2,
-  QrCode,
-  Copy,
-  ExternalLink,
-  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,8 +27,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { candidateLogin, adminLogin, getApiErrorMessage } from '@/services';
+import { adminLogin, getApiErrorMessage } from '@/services';
 import { useAuth } from '@/components/providers/auth-provider';
 
 const loginSchema = z.object({
@@ -46,49 +39,20 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const examId = searchParams.get('examId');
   const { user, isAuthenticated, isLoading: isAuthLoading, setUser } = useAuth();
   
   const [showPassword, setShowPassword] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [rememberMe, setRememberMe] = React.useState(false);
-  const [qrModalOpen, setQrModalOpen] = React.useState(false);
-  const [qrCodeUrl, setQrCodeUrl] = React.useState('');
-  const [isCopied, setIsCopied] = React.useState(false);
 
-  // Derive target candidate registration URL
-  const regUrl = React.useMemo(() => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com';
-    const targetUrl = process.env.NEXT_PUBLIC_APP_URL || origin;
-    return examId ? `${targetUrl}/register?examId=${examId}` : `${targetUrl}/register`;
-  }, [examId]);
-
-  // Auto redirect if already authenticated
+  // Auto redirect if already authenticated as Admin
   React.useEffect(() => {
     if (!isAuthLoading && isAuthenticated && user) {
       if (user.userType === 'ADMIN') {
         router.replace('/admin/dashboard');
-      } else {
-        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
-        router.replace(dest);
       }
     }
-  }, [isAuthenticated, user, isAuthLoading, examId, router]);
-
-  // Generate QR Code dynamically
-  React.useEffect(() => {
-    QRCode.toDataURL(regUrl, {
-      width: 200,
-      margin: 1.5,
-      color: {
-        dark: '#1e293b', // slate-800
-        light: '#ffffff',
-      },
-    })
-      .then((url) => setQrCodeUrl(url))
-      .catch((err) => console.error('Failed to generate QR Code:', err));
-  }, [regUrl]);
+  }, [isAuthenticated, user, isAuthLoading, router]);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -98,26 +62,10 @@ function LoginContent() {
   async function onSubmit(values: LoginFormValues) {
     setIsSubmitting(true);
     try {
-      // 1. Try Candidate login
-      try {
-        const candidate = await candidateLogin(values);
-        setUser({ ...candidate, userType: 'CANDIDATE' });
-        toast.success(`Welcome back, ${candidate.fullName.split(' ')[0]}`);
-        const dest = examId ? `/candidate/dashboard?examId=${examId}` : '/candidate/dashboard';
-        router.push(dest);
-        return;
-      } catch (candidateError: any) {
-        if (candidateError.response?.status === 400 || candidateError.response?.status === 422) {
-          throw candidateError;
-        }
-
-        // 2. Try Admin login
-        const admin = await adminLogin(values);
-        setUser({ ...admin, userType: 'ADMIN' });
-        toast.success(`Welcome back, ${admin.fullName.split(' ')[0]}`);
-        router.push('/admin/dashboard');
-        return;
-      }
+      const admin = await adminLogin(values);
+      setUser({ ...admin, userType: 'ADMIN' });
+      toast.success(`Welcome back, ${admin.fullName.split(' ')[0]}`);
+      router.push('/admin/dashboard');
     } catch (error) {
       toast.error('Sign-in failed', {
         description: getApiErrorMessage(error, 'Invalid email or password'),
@@ -127,30 +75,15 @@ function LoginContent() {
     }
   }
 
-  const handleCopyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(regUrl);
-      setIsCopied(true);
-      toast.success('Registration link copied to clipboard!');
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch {
-      toast.error('Failed to copy link');
-    }
-  };
-
-  const handleOpenLink = () => {
-    window.open(regUrl, '_blank');
-  };
-
   const handleForgotPassword = () => {
     toast.info('Password Reset', {
-      description: 'Please contact your administrator to reset your password.',
+      description: 'Please contact your system administrator to reset your password.',
     });
   };
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50/20">
-      {/* Header with minimal Top-Right Quick Access Actions */}
+      {/* Header */}
       <header className="border-b border-slate-100 bg-white sticky top-0 z-40">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900">
@@ -159,32 +92,6 @@ function LoginContent() {
             </div>
             <span>AssessPlatform</span>
           </Link>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setQrModalOpen(true)}
-              className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all shadow-sm"
-              title="View Candidate QR Registration Code"
-              aria-label="QR Code"
-            >
-              <QrCode className="size-4 text-blue-600" />
-            </button>
-            <button
-              onClick={handleCopyLink}
-              className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all shadow-sm"
-              title="Copy Candidate Registration Link"
-              aria-label="Copy Link"
-            >
-              {isCopied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
-            </button>
-            <button
-              onClick={handleOpenLink}
-              className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all shadow-sm"
-              title="Open Candidate Registration Page"
-              aria-label="Open Link"
-            >
-              <ExternalLink className="size-4" />
-            </button>
-          </div>
         </div>
       </header>
 
@@ -194,10 +101,10 @@ function LoginContent() {
           {/* Header Title & Description */}
           <div className="text-center space-y-3">
             <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight">
-              Online Candidate Assessment Platform
+              Admin Portal
             </h2>
             <p className="text-slate-500 text-xs sm:text-sm leading-relaxed">
-              Secure online examinations with live monitoring and automated evaluation.
+              Sign in to manage candidate assessments, monitor active drives, and review results.
             </p>
           </div>
 
@@ -216,7 +123,7 @@ function LoginContent() {
                         <FormControl>
                           <Input
                             type="email"
-                            placeholder="name@example.com"
+                            placeholder="admin@example.com"
                             autoComplete="email"
                             className="border-slate-200 focus-visible:ring-blue-600 rounded-xl"
                             {...field}
@@ -289,80 +196,8 @@ function LoginContent() {
               </Form>
             </CardContent>
           </Card>
-
-          {/* Bottom Register Link */}
-          <p className="text-center text-xs sm:text-sm text-slate-500">
-            Don&apos;t have an account?{' '}
-            <Link
-              href={examId ? `/register?examId=${examId}` : '/register'}
-              className="font-medium text-blue-600 hover:underline"
-            >
-              Register as Student
-            </Link>
-          </p>
-
-          {/* QR / Copy / Open Action Buttons below the login card */}
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <button
-              onClick={() => setQrModalOpen(true)}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-sm text-xs font-medium"
-            >
-              <QrCode className="size-4 text-blue-600" />
-              QR Code
-            </button>
-            <button
-              onClick={handleCopyLink}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-sm text-xs font-medium"
-            >
-              {isCopied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4 text-blue-600" />}
-              Copy Link
-            </button>
-            <button
-              onClick={handleOpenLink}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-sm text-xs font-medium"
-            >
-              <ExternalLink className="size-4 text-blue-600" />
-              Open Link
-            </button>
-          </div>
         </div>
       </main>
-
-      {/* QR Code Popup Modal */}
-      <Dialog open={qrModalOpen} onOpenChange={setQrModalOpen}>
-        <DialogContent className="sm:max-w-sm rounded-2xl p-6 bg-white border border-slate-100">
-          <DialogHeader>
-            <DialogTitle className="text-center font-display text-base font-semibold tracking-tight text-slate-800">
-              Scan Registration Link
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col items-center space-y-4 pt-2">
-            <div className="flex size-44 items-center justify-center rounded-2xl border border-slate-100 bg-white p-2.5 shadow-sm shrink-0">
-              {qrCodeUrl ? (
-                <Image
-                  src={qrCodeUrl}
-                  alt="Candidate Registration QR"
-                  width={150}
-                  height={150}
-                  className="object-contain rounded-lg"
-                  unoptimized
-                />
-              ) : (
-                <Loader2 className="size-6 animate-spin text-slate-400" />
-              )}
-            </div>
-            <p className="text-[11px] text-slate-500 text-center max-w-[260px]">
-              Scan this QR code to access candidate registration.
-            </p>
-            <Button
-              onClick={() => setQrModalOpen(false)}
-              className="w-full bg-slate-900 text-white hover:bg-slate-800 rounded-xl"
-            >
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Footer */}
       <footer className="py-6 text-center text-xs text-slate-400 border-t border-slate-100 bg-white mt-auto">

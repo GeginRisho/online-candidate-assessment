@@ -257,7 +257,7 @@ export default function CandidatesPage() {
                         </td>
                         <td className="px-4 py-3 text-xs">
                           <div className="font-medium">{c?.collegeName}</div>
-                          <div className="text-muted-foreground">{c?.degree} · {c?.branch}</div>
+                          <div className="text-muted-foreground">{c?.degree} · {c?.branch} · Yr: {c?.yearOfStudy || 'N/A'}</div>
                         </td>
                         <td className="px-4 py-3 text-xs">
                           <div className="flex items-center gap-1.5">
@@ -409,7 +409,7 @@ function CandidateDetailsContent({ session }: { session: any }) {
           <p className="text-xs text-muted-foreground">{c?.email}</p>
           <p className="text-xs text-muted-foreground">Phone: {c?.phone || 'N/A'}</p>
           <p className="text-xs text-muted-foreground">College: {c?.collegeName}</p>
-          <p className="text-xs text-muted-foreground">{c?.degree} — {c?.branch} ({c?.graduationYear})</p>
+          <p className="text-xs text-muted-foreground">{c?.degree} — {c?.branch} · Year: {c?.yearOfStudy || 'N/A'} ({c?.graduationYear || 'N/A'})</p>
           <p className="text-xs text-muted-foreground font-mono">Code: {c?.candidateCode}</p>
         </div>
         <div className="space-y-1">

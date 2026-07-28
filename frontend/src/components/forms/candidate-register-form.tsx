@@ -73,11 +73,11 @@ export function CandidateRegisterForm({ qrRef }: { qrRef?: string }) {
         branch: values.branch || undefined,
         qrRef,
       });
-      setUser({ ...candidate, userType: 'CANDIDATE' });
+      setUser({ ...candidate.user, userType: 'CANDIDATE' });
       toast.success('Registration successful', {
-        description: `Your candidate code is ${candidate.candidateCode}.`,
+        description: `Your candidate code is ${candidate.user.candidateCode}.`,
       });
-      router.push('/instructions');
+      router.push(`/exam/${candidate.sessionId}/waiting`);
     } catch (error) {
       toast.error('Registration failed', { description: getApiErrorMessage(error) });
     } finally {

@@ -6,7 +6,10 @@ import * as examsController from './exams.controller';
 
 export const examsRouter = Router();
 
-// Require authenticated user for all exam endpoints
+// Public endpoint (accessible without auth)
+examsRouter.get('/public/:qrToken', examsController.getExamByQrToken);
+
+// Require authenticated user for all following exam endpoints
 examsRouter.use(requireAuth);
 
 examsRouter.get('/', examsController.getExams);
@@ -32,4 +35,11 @@ examsRouter.delete(
   requireRole('ADMIN'),
   validate(getExamSchema),
   examsController.deleteExam,
+);
+
+examsRouter.post(
+  '/:id/qr',
+  requireRole('ADMIN'),
+  validate(getExamSchema),
+  examsController.generateQrToken,
 );

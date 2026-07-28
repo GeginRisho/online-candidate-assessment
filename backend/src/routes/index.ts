@@ -3,6 +3,7 @@ import { authRouter } from '@modules/auth/auth.routes';
 import { examsRouter } from '@modules/exams/exams.routes';
 import { sessionsRouter } from '@modules/exam-sessions/exam-sessions.routes';
 import { questionsRouter } from '@modules/questions/questions.routes';
+import { domainsRouter } from '@modules/domains/domains.routes';
 
 export const apiRouter = Router();
 
@@ -29,6 +30,7 @@ apiRouter.use('/auth', authRouter);
 apiRouter.use('/exams', examsRouter);
 apiRouter.use('/exam-sessions', sessionsRouter);
 apiRouter.use('/questions', questionsRouter);
+apiRouter.use('/domains', domainsRouter);
 
 // ---------------------------------------------------------------------------
 // Admin-prefixed aliases — /api/v1/admin/exams, /api/v1/admin/exam-sessions
@@ -38,3 +40,4 @@ apiRouter.use('/questions', questionsRouter);
 apiRouter.use('/admin/exams', examsRouter);
 apiRouter.use('/admin/exam-sessions', sessionsRouter);
 apiRouter.use('/admin/questions', questionsRouter);
+apiRouter.use('/admin/domains', domainsRouter);

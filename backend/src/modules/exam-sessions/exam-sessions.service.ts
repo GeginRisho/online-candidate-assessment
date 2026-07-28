@@ -1,5 +1,5 @@
 import { prisma } from '@config/prisma';
-import { ForbiddenError, NotFoundError } from '@utils/AppError';
+import { ForbiddenError, NotFoundError, BadRequestError } from '@utils/AppError';
 import { emitToMonitors, emitToSession, SOCKET_EVENTS } from '@sockets/index';
 import type { SaveAnswerInput, WarningSessionInput } from './exam-sessions.validation';
 import { ExamSessionStatus } from '@prisma/client';
@@ -105,6 +105,9 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
           fullName: true,
           collegeName: true,
           branch: true,
+          degree: true,
+          yearOfStudy: true,
+          status: true,
         },
       },
       answers: true,
@@ -139,21 +142,43 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
     });
   }
 
+  // Get available domains configured for this exam based on assigned technical questions
+  const allTechnicalQuestions = session.exam.examQuestions
+    .map((eq) => eq.question)
+    .filter((q) => q.type === 'TECHNICAL');
+  const configuredDomains = Array.from(new Set(allTechnicalQuestions.map((q) => q.domain)));
+
+  // Candidate filtering based on domain selection
+  let finalQuestions = cleanExamQuestions;
+  if (role === 'CANDIDATE') {
+    finalQuestions = cleanExamQuestions.filter((eq) => {
+      const q = eq.question as any;
+      if (q.type === 'APTITUDE') return true;
+      if (q.type === 'TECHNICAL') {
+        return session.selectedDomain ? q.domain === session.selectedDomain : false;
+      }
+      return false;
+    });
+  }
+
   return {
     ...session,
     exam: {
       ...session.exam,
-      examQuestions: cleanExamQuestions,
+      examQuestions: finalQuestions,
     },
+    configuredDomains,
   };
 }
 
-export async function saveAnswer(sessionId: string, candidateId: string, input: SaveAnswerInput) {
+export async function saveAnswer(sessionId: string, candidateId: string | undefined, input: SaveAnswerInput) {
   const session = await prisma.examSession.findUnique({ where: { id: sessionId } });
-  if (!session || session.status !== 'IN_PROGRESS') {
+  if (!session) throw new NotFoundError('Exam session not found');
+  if (session.status !== 'IN_PROGRESS') {
     throw new ForbiddenError('Cannot save answer: Exam session is not in progress');
   }
 
+  const effCandidateId = candidateId || session.candidateId;
   const { questionId, selectedOptions, codeAnswer, textAnswer, timeSpentSec, isFlagged } = input;
 
   // Verify question exists
@@ -181,7 +206,7 @@ export async function saveAnswer(sessionId: string, candidateId: string, input: 
   return prisma.answer.create({
     data: {
       examSessionId: sessionId,
-      candidateId,
+      candidateId: effCandidateId,
       questionId,
       selectedOptions: selectedOptions !== null ? (selectedOptions as any) : undefined,
       codeAnswer,
@@ -195,7 +220,7 @@ export async function saveAnswer(sessionId: string, candidateId: string, input: 
 
 export async function logWarning(
   sessionId: string,
-  candidateId: string,
+  candidateId: string | undefined,
   input: WarningSessionInput & { browserInfo?: any; ipAddress?: string }
 ) {
   const session = await prisma.examSession.findUnique({
@@ -207,11 +232,13 @@ export async function logWarning(
     throw new ForbiddenError('Cannot log warning: Exam session is not active');
   }
 
+  const effCandidateId = candidateId || session.candidateId;
+
   // Log the warning record
   const warning = await prisma.warning.create({
     data: {
       examSessionId: sessionId,
-      candidateId,
+      candidateId: effCandidateId,
       type: input.type,
       severity: input.severity,
       message: input.message,
@@ -265,7 +292,7 @@ export async function logWarning(
     });
 
     await prisma.candidate.update({
-      where: { id: candidateId },
+      where: { id: effCandidateId },
       data: { status: 'DISQUALIFIED' },
     });
 
@@ -281,7 +308,7 @@ export async function logWarning(
         fullscreenStatus: fullscreenStatusUpdate,
       },
     });
-    const submissionResult = await submitSession(sessionId, candidateId, true);
+    const submissionResult = await submitSession(sessionId, effCandidateId, true);
     updatedSession = submissionResult.session;
   } else {
     updatedSession = await prisma.examSession.update({
@@ -297,7 +324,7 @@ export async function logWarning(
   // Notify socket room
   emitToMonitors(session.examId, SOCKET_EVENTS.SESSION_WARNING, {
     sessionId,
-    candidateId,
+    candidateId: effCandidateId,
     warning,
     totalWarnings: nextWarningCount,
     status: updatedSession.status,
@@ -307,7 +334,7 @@ export async function logWarning(
   return { warning, session: updatedSession };
 }
 
-export async function submitSession(sessionId: string, candidateId: string, isAutoSubmit = false) {
+export async function submitSession(sessionId: string, candidateId: string | undefined, isAutoSubmit = false) {
   const session = await prisma.examSession.findUnique({
     where: { id: sessionId },
     include: {
@@ -331,6 +358,7 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
     throw new ForbiddenError('Exam session is already submitted or inactive');
   }
 
+  const effCandidateId = candidateId || session.candidateId;
   const endedAt = new Date();
   const durationSec = Math.floor((endedAt.getTime() - (session.startedAt?.getTime() ?? endedAt.getTime())) / 1000);
 
@@ -407,7 +435,7 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
   const result = await prisma.result.create({
     data: {
       examSessionId: sessionId,
-      candidateId,
+      candidateId: effCandidateId,
       
       // Candidate details snapshot
       candidateName: session.candidate.fullName,
@@ -417,6 +445,7 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
       branch: session.candidate.branch || null,
       degree: session.candidate.degree || null,
       graduationYear: session.candidate.graduationYear || null,
+      yearOfStudy: session.candidate.yearOfStudy || null,
 
       // Exam details snapshot
       examName: session.exam.title,
@@ -458,7 +487,7 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
   });
 
   await prisma.candidate.update({
-    where: { id: candidateId },
+    where: { id: effCandidateId },
     data: { status: 'COMPLETED' },
   });
 
@@ -471,7 +500,7 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
   // Broadcast monitoring event
   emitToMonitors(session.examId, SOCKET_EVENTS.SESSION_COMPLETED, {
     sessionId,
-    candidateId,
+    candidateId: effCandidateId,
     status: finalStatus,
     endedAt,
     result,
@@ -482,25 +511,29 @@ export async function submitSession(sessionId: string, candidateId: string, isAu
 
 export async function heartbeat(
   sessionId: string,
-  candidateId: string,
-  updates?: { webcamStatus?: string; fullscreenStatus?: string; currentQuestionNum?: number }
+  candidateId?: string,
+  updates?: { webcamStatus?: string; microphoneStatus?: string; fullscreenStatus?: string; currentQuestionNum?: number }
 ) {
   const updated = await prisma.examSession.update({
     where: { id: sessionId },
     data: {
       lastHeartbeatAt: new Date(),
       webcamStatus: updates?.webcamStatus ?? undefined,
+      microphoneStatus: updates?.microphoneStatus ?? undefined,
       fullscreenStatus: updates?.fullscreenStatus ?? undefined,
       currentQuestionNum: updates?.currentQuestionNum ?? undefined,
     },
   });
 
+  const effCandidateId = candidateId || updated.candidateId;
+
   emitToMonitors(updated.examId, SOCKET_EVENTS.SESSION_UPDATE, {
     sessionId,
-    candidateId,
+    candidateId: effCandidateId,
     status: updated.status,
     lastHeartbeatAt: updated.lastHeartbeatAt,
     webcamStatus: updated.webcamStatus,
+    microphoneStatus: updated.microphoneStatus,
     fullscreenStatus: updated.fullscreenStatus,
     currentQuestionNum: updated.currentQuestionNum,
   });
@@ -657,7 +690,9 @@ export async function exportResults(res: Response) {
     { header: 'College', key: 'college', width: 25 },
     { header: 'Branch', key: 'branch', width: 20 },
     { header: 'Degree', key: 'degree', width: 15 },
+    { header: 'Year of Study', key: 'yearOfStudy', width: 15 },
     { header: 'Graduation Year', key: 'year', width: 15 },
+    { header: 'Registration Date & Time', key: 'registrationDate', width: 25 },
     { header: 'Exam Name', key: 'examName', width: 25 },
     { header: 'Start Time', key: 'startTime', width: 25 },
     { header: 'End Time', key: 'endTime', width: 25 },
@@ -667,10 +702,12 @@ export async function exportResults(res: Response) {
     { header: 'Total Score', key: 'totalScore', width: 15 },
     { header: 'Percentage', key: 'percentage', width: 15 },
     { header: 'Pass/Fail', key: 'passFail', width: 15 },
+    { header: 'Session Status', key: 'sessionStatus', width: 20 },
     { header: 'Warning Count', key: 'warningCount', width: 15 },
+    { header: 'Webcam Status', key: 'webcamStatus', width: 15 },
+    { header: 'Microphone Status', key: 'microphoneStatus', width: 18 },
+    { header: 'Fullscreen Status', key: 'fullscreenStatus', width: 18 },
     { header: 'Violation History', key: 'violations', width: 40 },
-    { header: 'Disqualified Status', key: 'disqualified', width: 20 },
-    { header: 'Submission Type (Manual/Auto)', key: 'submissionType', width: 25 },
   ];
 
   worksheet.getRow(1).font = { bold: true };
@@ -683,7 +720,9 @@ export async function exportResults(res: Response) {
     const college = r.collegeName || r.candidate.collegeName || '';
     const branch = r.branch || r.candidate.branch || '';
     const degree = r.degree || r.candidate.degree || '';
+    const yearOfStudy = r.yearOfStudy || r.candidate.yearOfStudy || '';
     const year = r.graduationYear || (r.candidate.graduationYear ? String(r.candidate.graduationYear) : '');
+    const registrationDate = r.candidate.createdAt ? new Date(r.candidate.createdAt).toLocaleString() : '';
 
     const examName = r.examName || r.examSession.exam.title;
     const startTime = r.startTime || r.examSession.startedAt;
@@ -692,9 +731,11 @@ export async function exportResults(res: Response) {
       ? Math.floor((new Date(r.examSession.endedAt).getTime() - new Date(r.examSession.startedAt).getTime()) / 1000)
       : 0);
 
+    const sessionStatus = r.examSession.status;
     const warningCount = r.warningCount || r.examSession.warningCount;
-    const isDisqualified = r.isDisqualified || r.examSession.isDisqualified;
-    const submissionType = r.submissionType || (r.examSession.status === 'AUTO_SUBMITTED' ? 'AUTO' : 'MANUAL');
+    const webcamStatus = r.examSession.webcamStatus || 'INACTIVE';
+    const microphoneStatus = r.examSession.microphoneStatus || 'INACTIVE';
+    const fullscreenStatus = r.examSession.fullscreenStatus || 'INACTIVE';
 
     const violationsList = r.violations
       ? (r.violations as any[]).map((v) => `${v.type}: ${v.message}`).join('; ')
@@ -708,7 +749,9 @@ export async function exportResults(res: Response) {
       college,
       branch,
       degree,
+      yearOfStudy,
       year,
+      registrationDate,
       examName,
       startTime: startTime ? new Date(startTime).toLocaleString() : '',
       endTime: endTime ? new Date(endTime).toLocaleString() : '',
@@ -718,10 +761,12 @@ export async function exportResults(res: Response) {
       totalScore: r.totalScore,
       percentage: `${r.percentage.toFixed(2)}%`,
       passFail: r.status,
+      sessionStatus,
       warningCount,
+      webcamStatus,
+      microphoneStatus,
+      fullscreenStatus,
       violations: violationsList,
-      disqualified: isDisqualified ? 'Disqualified' : 'Active/Clear',
-      submissionType: submissionType === 'AUTO' ? 'Auto' : 'Manual',
     });
   }
 
@@ -765,30 +810,53 @@ export async function exportIndividualResult(sessionId: string, res: Response) {
   worksheet.addRow(['CANDIDATE PROFILE']).font = { bold: true };
   worksheet.addRow(['Name', session.candidate.fullName, 'Code', session.candidate.candidateCode]);
   worksheet.addRow(['Email', session.candidate.email, 'Phone', session.candidate.phone || 'N/A']);
-  worksheet.addRow(['College', session.candidate.collegeName || 'N/A', 'Graduation Year', session.candidate.graduationYear || 'N/A']);
-  worksheet.addRow(['Degree', session.candidate.degree || 'N/A', 'Branch', session.candidate.branch || 'N/A']);
+  worksheet.addRow(['College Name', session.candidate.collegeName || 'N/A', 'Branch', session.candidate.branch || 'N/A']);
+  worksheet.addRow(['Degree', session.candidate.degree || 'N/A', 'Year of Study', session.candidate.yearOfStudy || 'N/A']);
+  worksheet.addRow(['Graduation Year', session.candidate.graduationYear || 'N/A', 'Registration Date', session.candidate.createdAt ? new Date(session.candidate.createdAt).toLocaleString() : 'N/A']);
 
-  // Exam Details Section
+  // Exam Details
   worksheet.addRow([]);
-  worksheet.addRow(['ASSESSMENT DRIVE']).font = { bold: true };
-  worksheet.addRow(['Exam Title', session.exam.title, 'Status', session.status]);
-  const durationSec = session.result?.durationSec || (session.startedAt && session.endedAt 
-    ? Math.floor((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000) 
-    : 0);
-  worksheet.addRow(['Started At', session.startedAt ? new Date(session.startedAt).toLocaleString() : '—', 'Ended At', session.endedAt ? new Date(session.endedAt).toLocaleString() : '—']);
-  worksheet.addRow(['Duration', `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`, 'Submission Type', session.result?.submissionType === 'AUTO' ? 'Auto' : 'Manual']);
+  worksheet.addRow(['EXAM DETAILS']).font = { bold: true };
+  worksheet.addRow(['Exam Title', session.exam.title, 'Session Status', session.status]);
+  worksheet.addRow([
+    'Start Time',
+    session.startedAt ? new Date(session.startedAt).toLocaleString() : 'N/A',
+    'End Time',
+    session.endedAt ? new Date(session.endedAt).toLocaleString() : 'N/A',
+  ]);
+  const durationSec = session.startedAt && session.endedAt
+    ? Math.floor((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)
+    : 0;
+  worksheet.addRow([
+    'Duration',
+    `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`,
+    'Selected Track/Domain',
+    session.selectedDomain || 'N/A',
+  ]);
 
-  // Score Details Section
-  worksheet.addRow([]);
-  worksheet.addRow(['PERFORMANCE SUMMARY']).font = { bold: true };
-  worksheet.addRow(['Aptitude Score', session.result?.aptitudeScore ?? 0, 'Technical Score', session.result?.technicalScore ?? 0]);
-  worksheet.addRow(['Total Score', session.result?.totalScore ?? 0, 'Total Marks Available', session.result?.totalMarks ?? 0]);
-  worksheet.addRow(['Percentage', `${session.result?.percentage?.toFixed(2) ?? 0}%`, 'Pass/Fail Status', session.result?.status ?? 'N/A']);
+  // Performance Section (If available)
+  if (session.result) {
+    worksheet.addRow([]);
+    worksheet.addRow(['PERFORMANCE SUMMARY']).font = { bold: true };
+    worksheet.addRow(['Aptitude Score', session.result.aptitudeScore, 'Technical Score', session.result.technicalScore]);
+    worksheet.addRow(['Total Score', session.result.totalScore, 'Total Marks Available', session.result.totalMarks]);
+    worksheet.addRow(['Percentage Obtained', `${session.result.percentage.toFixed(2)}%`, 'Passing Status', session.result.status]);
+    worksheet.addRow(['Correct Qs', session.result.correctCount, 'Incorrect Qs', session.result.incorrectCount]);
+    worksheet.addRow(['Unanswered Qs', session.result.unansweredCount]);
+  }
 
-  // Security Proctoring Details Section
+  // Security details
   worksheet.addRow([]);
   worksheet.addRow(['SECURITY & PROCTORING INTEGRITY']).font = { bold: true };
   worksheet.addRow(['Warning Count', session.warningCount, 'Disqualified Status', session.isDisqualified ? 'Disqualified' : 'Clear']);
+  worksheet.addRow([
+    'Webcam Status',
+    session.webcamStatus || 'INACTIVE',
+    'Microphone Status',
+    session.microphoneStatus || 'INACTIVE',
+    'Fullscreen Status',
+    session.fullscreenStatus || 'INACTIVE',
+  ]);
 
   // Violations list
   worksheet.addRow([]);
@@ -816,4 +884,104 @@ export async function exportIndividualResult(sessionId: string, res: Response) {
 
   await workbook.xlsx.write(res);
   res.end();
+}
+
+export async function approveCandidate(candidateId: string) {
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
+  if (!candidate) throw new NotFoundError('Candidate not found');
+
+  const updated = await prisma.candidate.update({
+    where: { id: candidateId },
+    data: { status: 'VERIFIED' },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'UPDATE',
+      entity: 'CANDIDATE',
+      entityId: candidateId,
+      description: `Candidate ${candidate.email} approved by admin`,
+    },
+  });
+
+  return updated;
+}
+
+export async function rejectCandidate(candidateId: string) {
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
+  if (!candidate) throw new NotFoundError('Candidate not found');
+
+  const updated = await prisma.candidate.update({
+    where: { id: candidateId },
+    data: { status: 'DISQUALIFIED' },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'UPDATE',
+      entity: 'CANDIDATE',
+      entityId: candidateId,
+      description: `Candidate ${candidate.email} rejected by admin`,
+    },
+  });
+
+  return updated;
+}
+
+export async function startCandidateExam(candidateId: string) {
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: candidateId },
+    include: { examSessions: true },
+  });
+  if (!candidate) throw new NotFoundError('Candidate not found');
+
+  const session = candidate.examSessions[0];
+  if (!session) throw new NotFoundError('Candidate exam session not found');
+
+  const updatedCandidate = await prisma.candidate.update({
+    where: { id: candidateId },
+    data: { status: 'IN_PROGRESS' },
+  });
+
+  const updatedSession = await prisma.examSession.update({
+    where: { id: session.id },
+    data: {
+      status: 'IN_PROGRESS',
+      startedAt: new Date(),
+      lastHeartbeatAt: new Date(),
+    },
+  });
+
+  emitToMonitors(session.examId, SOCKET_EVENTS.SESSION_STARTED, {
+    sessionId: session.id,
+    candidateId,
+    status: updatedSession.status,
+    startedAt: updatedSession.startedAt,
+  });
+
+  return { candidate: updatedCandidate, session: updatedSession };
+}
+
+export async function selectDomain(sessionId: string, domain: string) {
+  const session = await prisma.examSession.findUnique({
+    where: { id: sessionId },
+    include: { exam: { include: { examQuestions: { include: { question: true } } } } },
+  });
+  if (!session) throw new NotFoundError('Session not found');
+
+  const allTechnicalQuestions = session.exam.examQuestions
+    .map((eq) => eq.question)
+    .filter((q) => q.type === 'TECHNICAL');
+  const configuredDomains = Array.from(new Set(allTechnicalQuestions.map((q) => q.domain)));
+
+  if (!configuredDomains.includes(domain)) {
+    throw new BadRequestError(`Domain '${domain}' is not configured/available for this exam`);
+  }
+
+  const updated = await prisma.examSession.update({
+    where: { id: sessionId },
+    data: { selectedDomain: domain },
+  });
+
+  return updated;
 }

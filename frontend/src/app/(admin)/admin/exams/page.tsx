@@ -1,6 +1,5 @@
 'use client';
 
-
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -11,16 +10,29 @@ import {
   CheckCircle,
   Plus,
   ShieldCheck,
+  QrCode,
+  Copy,
+  Share2,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { fetchExams } from '@/services';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { fetchExams, regenerateExamQrToken } from '@/services';
 import { apiClient } from '@/services/apiClient';
 import { toast } from 'sonner';
 
 export default function ExamsPage() {
   const queryClient = useQueryClient();
   const [togglingId, setTogglingId] = React.useState<string | null>(null);
+  const [selectedExamForQr, setSelectedExamForQr] = React.useState<any>(null);
+  const [regenerating, setRegenerating] = React.useState(false);
 
   const { data: exams = [], isLoading, error, isError } = useQuery({
     queryKey: ['admin-exams'],
@@ -47,6 +59,22 @@ export default function ExamsPage() {
       setTogglingId(null);
     },
   });
+
+  const handleRegenerateQr = async (examId: string) => {
+    setRegenerating(true);
+    try {
+      const updated = await regenerateExamQrToken(examId);
+      toast.success('QR Code and Public Link generated successfully!');
+      queryClient.invalidateQueries({ queryKey: ['admin-exams'] });
+      if (selectedExamForQr && selectedExamForQr.id === examId) {
+        setSelectedExamForQr(updated);
+      }
+    } catch (err: any) {
+      toast.error('Failed to generate QR token');
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -144,7 +172,7 @@ export default function ExamsPage() {
                   </CardContent>
                 </div>
 
-                 <div className="p-6 pt-0 border-t border-border/40 mt-4 flex items-center justify-between gap-2">
+                <div className="p-6 pt-0 border-t border-border/40 mt-4 flex items-center justify-between gap-2">
                   <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
                     <CheckCircle className="size-3.5" />
                     Passing: {exam.passingScorePercent}%
@@ -158,8 +186,20 @@ export default function ExamsPage() {
                     >
                       {exam.isActive ? 'Deactivate' : 'Activate'}
                     </Button>
-                    <Button variant="outline" size="sm">
-                      Configure
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (exam.qrToken) {
+                          setSelectedExamForQr(exam);
+                        } else {
+                          handleRegenerateQr(exam.id);
+                        }
+                      }}
+                      className="gap-1 text-xs"
+                    >
+                      <QrCode className="size-3.5" />
+                      <span>{exam.qrToken ? 'QR Code' : 'Gen Link'}</span>
                     </Button>
                   </div>
                 </div>
@@ -168,6 +208,98 @@ export default function ExamsPage() {
           })}
         </div>
       )}
+
+      {/* QR Code and Share Dialog */}
+      <Dialog open={Boolean(selectedExamForQr)} onOpenChange={(open) => !open && setSelectedExamForQr(null)}>
+        <DialogContent className="max-w-md w-[90vw] rounded-2xl bg-white p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <QrCode className="size-5 text-blue-600" />
+              Public Link & QR Access
+            </DialogTitle>
+            <DialogDescription>
+              Share this access portal with candidates. No registration login required.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedExamForQr && (
+            <div className="flex flex-col items-center space-y-6 pt-4">
+              {/* QR Image */}
+              <div className="size-52 bg-slate-100 border border-slate-200 rounded-2xl p-3 flex items-center justify-center relative group">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                    `${typeof window !== 'undefined' ? window.location.origin : ''}/register?token=${selectedExamForQr.qrToken}`
+                  )}`}
+                  alt="Exam QR Code"
+                  className="size-full object-contain"
+                />
+              </div>
+
+              {/* Public Link details */}
+              <div className="w-full space-y-2">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Public Exam Link
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/register?token=${selectedExamForQr.qrToken}`}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-600 focus:outline-none"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 h-9 rounded-xl px-3 border-slate-200 text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      const link = `${window.location.origin}/register?token=${selectedExamForQr.qrToken}`;
+                      navigator.clipboard.writeText(link);
+                      toast.success('Link copied to clipboard!');
+                    }}
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Sharing / Regenerating buttons */}
+              <div className="w-full flex gap-3 pt-2">
+                <Button
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl gap-2 text-xs py-5"
+                  onClick={async () => {
+                    const link = `${window.location.origin}/register?token=${selectedExamForQr.qrToken}`;
+                    if (navigator.share) {
+                      try {
+                        await navigator.share({
+                          title: selectedExamForQr.title,
+                          text: `Join the assessment drive: ${selectedExamForQr.title}`,
+                          url: link,
+                        });
+                        toast.success('Shared successfully!');
+                      } catch {}
+                    } else {
+                      navigator.clipboard.writeText(link);
+                      toast.success('Link copied (Web Share API not supported on this browser)');
+                    }
+                  }}
+                >
+                  <Share2 className="size-4" />
+                  Share Public Link
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="border-slate-200 text-slate-700 hover:bg-slate-50 font-medium rounded-xl gap-2 text-xs py-5"
+                  disabled={regenerating}
+                  onClick={() => handleRegenerateQr(selectedExamForQr.id)}
+                >
+                  <RefreshCw className={`size-4 ${regenerating ? 'animate-spin' : ''}`} />
+                  Regenerate QR
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

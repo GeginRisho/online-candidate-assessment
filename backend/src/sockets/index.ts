@@ -4,6 +4,8 @@ import { env } from '@config/env';
 import { logger } from '@config/logger';
 import { verifyAccessToken } from '@utils/jwt';
 
+import { prisma } from '@config/prisma';
+
 export const SOCKET_EVENTS = {
   // Candidate -> Server
   CANDIDATE_JOIN_SESSION: 'candidate:join_session',
@@ -67,13 +69,24 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
   });
 
 
-  io.use((socket: Socket, next) => {
+  io.use(async (socket: Socket, next) => {
     try {
       const token =
         (socket.handshake.auth?.token as string | undefined) ??
         (socket.handshake.headers.authorization?.replace('Bearer ', '') as string | undefined);
 
-      if (!token) return next(new Error('Authentication required'));
+      if (!token) {
+        // Support passwordless candidates connecting via sessionId
+        const sessionId = (socket.handshake.auth?.sessionId as string | undefined) ?? (socket.handshake.query?.sessionId as string | undefined);
+        if (sessionId) {
+          const session = await prisma.examSession.findUnique({ where: { id: sessionId } });
+          if (session) {
+            socket.data.user = { id: session.candidateId, role: 'CANDIDATE', sessionId: session.id };
+            return next();
+          }
+        }
+        return next(new Error('Authentication required'));
+      }
 
       const payload = verifyAccessToken(token);
       socket.data.user = { id: payload.sub, role: payload.role, email: payload.email };

@@ -23,14 +23,16 @@ export interface AdminRegisterPayload {
 
 export interface CandidateRegisterPayload {
   email: string;
-  password: string;
   fullName: string;
   phone?: string;
   collegeName?: string;
   degree?: string;
   branch?: string;
+  yearOfStudy?: string;
   graduationYear?: number;
   qrRef?: string;
+  examId?: string;
+  examToken?: string;
 }
 
 export interface CandidateLoginPayload {
@@ -59,13 +61,12 @@ export async function adminRegister(payload: AdminRegisterPayload): Promise<Admi
 
 export async function candidateRegister(
   payload: CandidateRegisterPayload,
-): Promise<CandidateUser> {
-  const { data } = await apiClient.post<ApiSuccessResponse<LoginResult<CandidateUser>>>(
+): Promise<{ sessionId: string; user: CandidateUser }> {
+  const { data } = await apiClient.post<ApiSuccessResponse<{ sessionId: string; user: CandidateUser }>>(
     '/auth/candidate/register',
     payload,
   );
-  setAccessToken(data.data.accessToken);
-  return data.data.user;
+  return data.data;
 }
 
 export async function candidateLogin(payload: CandidateLoginPayload): Promise<CandidateUser> {

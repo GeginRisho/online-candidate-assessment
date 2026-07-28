@@ -28,6 +28,7 @@ export const submitSessionSchema = z.object({
 export const heartbeatSessionSchema = z.object({
   body: z.object({
     webcamStatus: z.string().optional(),
+    microphoneStatus: z.string().optional(),
     fullscreenStatus: z.string().optional(),
     currentQuestionNum: z.number().int().optional(),
   }).optional(),
@@ -45,6 +46,7 @@ export const warningSessionSchema = z.object({
     currentQuestionNum: z.number().int().optional(),
     fullscreenStatus: z.string().optional(),
     webcamStatus: z.string().optional(),
+    microphoneStatus: z.string().optional(),
     visibilityState: z.string().optional(),
     metadata: z.record(z.any()).optional(),
   }),
@@ -69,6 +71,17 @@ export const saveAnswerSchema = z.object({
   }),
 });
 
+export const selectDomainSchema = z.object({
+  body: z.object({
+    domain: z.string().min(1, 'Domain is required'),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({
+    id: z.string().uuid('Invalid session ID format'),
+  }),
+});
+
 export type StartSessionInput = z.infer<typeof startSessionSchema>['body'];
 export type WarningSessionInput = z.infer<typeof warningSessionSchema>['body'];
 export type SaveAnswerInput = z.infer<typeof saveAnswerSchema>['body'];
+export type SelectDomainInput = z.infer<typeof selectDomainSchema>['body'];

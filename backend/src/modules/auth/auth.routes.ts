@@ -6,7 +6,6 @@ import {
   adminLoginSchema,
   adminRegisterSchema,
   candidateRegisterSchema,
-  candidateLoginSchema,
   qrRegistrationQuerySchema,
   refreshTokenSchema,
 } from './auth.validation';
@@ -36,13 +35,6 @@ authRouter.post(
   authRateLimiter,
   validate(candidateRegisterSchema),
   authController.candidateRegister,
-);
-
-authRouter.post(
-  '/candidate/login',
-  authRateLimiter,
-  validate(candidateLoginSchema),
-  authController.candidateLogin,
 );
 
 authRouter.get(

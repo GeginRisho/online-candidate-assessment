@@ -49,7 +49,7 @@ export default function SystemCheckPage() {
         toast.error('Multiple Tabs Detected', {
           description: 'This exam session is already open in another tab.',
         });
-        router.replace('/dashboard');
+        router.replace('/');
       }
     };
 
@@ -127,8 +127,8 @@ export default function SystemCheckPage() {
               ? 'Assessment is not available. Please contact the administrator.'
               : errorMsg}
           </p>
-          <Button onClick={() => router.push('/dashboard')} className="w-full">
-            Back to Dashboard
+          <Button onClick={() => router.push('/')} className="w-full">
+            Return to Landing Page
           </Button>
         </Card>
       </div>
@@ -217,6 +217,16 @@ export default function SystemCheckPage() {
               </div>
             </div>
           </div>
+
+          {/* Camera / Mic Access Required Warning Block */}
+          {(videoPermission === 'denied' || audioPermission === 'denied') && (
+            <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-start gap-3">
+              <XCircle className="size-5 shrink-0 mt-0.5" />
+              <div className="text-sm font-medium">
+                Camera and microphone access are required to attend this assessment.
+              </div>
+            </div>
+          )}
 
           {/* Instructions check alert */}
           <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-lg flex items-start gap-3">
