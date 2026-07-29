@@ -12,14 +12,13 @@ import {
   Award,
   CheckCircle,
   RefreshCw,
-  Check,
   X,
   Play,
   Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { fetchAllCandidateSessionsAdmin, approveCandidate, rejectCandidate, startCandidateExam, approveAllCandidates } from '@/services';
+import { fetchAllCandidateSessionsAdmin, startCandidateExam, approveAllCandidates, deleteCandidate } from '@/services';
 import { apiClient } from '@/services/apiClient';
 
 export default function AdminDashboardPage() {
@@ -32,16 +31,6 @@ export default function AdminDashboardPage() {
 
   const queryClient = useQueryClient();
 
-  const approveMutation = useMutation({
-    mutationFn: approveCandidate,
-    onSuccess: () => {
-      toast.success('Candidate approved successfully');
-      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
-    },
-    onError: (err: any) => {
-      toast.error('Failed to approve candidate: ' + (err.response?.data?.message || err.message));
-    },
-  });
 
   const approveAllMutation = useMutation({
     mutationFn: approveAllCandidates,
@@ -54,16 +43,6 @@ export default function AdminDashboardPage() {
     },
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: rejectCandidate,
-    onSuccess: () => {
-      toast.success('Candidate registration rejected');
-      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
-    },
-    onError: (err: any) => {
-      toast.error('Failed to reject candidate: ' + (err.response?.data?.message || err.message));
-    },
-  });
 
   const startExamMutation = useMutation({
     mutationFn: startCandidateExam,
@@ -75,6 +54,18 @@ export default function AdminDashboardPage() {
       toast.error('Failed to start candidate exam: ' + (err.response?.data?.message || err.message));
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteCandidate,
+    onSuccess: () => {
+      toast.success('Candidate and all associated data deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to delete candidate: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
 
   const pendingSessions = sessions.filter((s: any) => s.candidate?.status === 'WAITING_APPROVAL' || s.candidate?.status === 'REGISTERED');
   const approvedSessions = sessions.filter((s: any) => s.candidate?.status === 'APPROVED' || s.candidate?.status === 'VERIFIED');
@@ -197,29 +188,29 @@ export default function AdminDashboardPage() {
           <CardContent className="space-y-6">
             {/* Pending approvals block */}
             <div>
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
                 <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider">
-                  Pending Approvals ({pendingSessions.length})
+                  Candidates Awaiting Exam Start ({pendingSessions.length + approvedSessions.length})
                 </h3>
                 {pendingSessions.length > 0 && (
                   <Button
                     size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl h-8 gap-1.5 px-3 shadow-sm transition-all"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg gap-1.5"
                     onClick={() => {
-                      if (confirm('Are you sure you want to approve all waiting candidates?')) {
+                      if (confirm(`Approve all ${pendingSessions.length} pending candidates?`)) {
                         approveAllMutation.mutate();
                       }
                     }}
                     loading={approveAllMutation.isPending}
                   >
-                    <Check className="size-3.5" />
+                    <CheckCircle className="size-3.5" />
                     <span>Approve All</span>
                   </Button>
                 )}
               </div>
-              {pendingSessions.length > 0 ? (
+              {(pendingSessions.length + approvedSessions.length) > 0 ? (
                 <div className="space-y-3">
-                  {pendingSessions.map((s: any) => (
+                  {[...pendingSessions, ...approvedSessions].map((s: any) => (
                     <div
                       key={s.id}
                       className="p-4 border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50 hover:bg-slate-50 transition-colors"
@@ -227,6 +218,9 @@ export default function AdminDashboardPage() {
                       <div className="min-w-0">
                         <div className="font-semibold text-foreground text-sm flex items-center gap-2">
                           {s.candidate?.fullName}
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 uppercase">
+                            {s.candidate?.status?.replace('_', ' ')}
+                          </span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5 truncate">
                           {s.candidate?.email} · {s.candidate?.collegeName} · {s.candidate?.degree} ({s.candidate?.branch})
@@ -238,22 +232,30 @@ export default function AdminDashboardPage() {
                       <div className="flex gap-2 shrink-0">
                         <Button
                           size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg gap-1"
-                          onClick={() => approveMutation.mutate(s.candidate.id)}
-                          loading={approveMutation.isPending}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg gap-1"
+                          onClick={() => {
+                            if (confirm(`Start exam for ${s.candidate?.fullName}? This will automatically launch their session.`)) {
+                              startExamMutation.mutate(s.candidate.id);
+                            }
+                          }}
+                          loading={startExamMutation.isPending}
                         >
-                          <Check className="size-3.5" />
-                          <span>Approve</span>
+                          <Play className="size-3.5 fill-current animate-pulse" />
+                          <span>Start Exam</span>
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
                           className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 font-medium text-xs rounded-lg gap-1"
-                          onClick={() => rejectMutation.mutate(s.candidate.id)}
-                          loading={rejectMutation.isPending}
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete candidate ${s.candidate?.fullName}? This will permanently remove their profile, session, answers, results, warnings, and audit logs.`)) {
+                              deleteMutation.mutate(s.candidate.id);
+                            }
+                          }}
+                          loading={deleteMutation.isPending}
                         >
                           <X className="size-3.5" />
-                          <span>Reject</span>
+                          <span>Delete</span>
                         </Button>
                       </div>
                     </div>
@@ -261,49 +263,7 @@ export default function AdminDashboardPage() {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground italic p-4 text-center border border-dashed rounded-xl bg-slate-50/35">
-                  No pending candidate approval requests.
-                </p>
-              )}
-            </div>
-
-            {/* Approved waiting to start list */}
-            <div>
-              <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">
-                Approved Candidates Ready for Assessment ({approvedSessions.length})
-              </h3>
-              {approvedSessions.length > 0 ? (
-                <div className="space-y-3">
-                  {approvedSessions.map((s: any) => (
-                    <div
-                      key={s.id}
-                      className="p-4 border border-emerald-100 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-50/10 hover:bg-emerald-50/20 transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-semibold text-foreground text-sm">
-                          {s.candidate?.fullName}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {s.candidate?.email} · {s.candidate?.collegeName} · {s.candidate?.degree}
-                        </div>
-                        <div className="text-[11px] text-emerald-600 font-semibold mt-1">
-                          Exam: {s.exam?.title}
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg gap-1 shrink-0"
-                        onClick={() => startExamMutation.mutate(s.candidate.id)}
-                        loading={startExamMutation.isPending}
-                      >
-                        <Play className="size-3.5 fill-current" />
-                        <span>Launch Exam</span>
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground italic p-4 text-center border border-dashed rounded-xl bg-slate-50/35">
-                  No approved candidates awaiting exam launch.
+                  No candidates awaiting exam start.
                 </p>
               )}
             </div>

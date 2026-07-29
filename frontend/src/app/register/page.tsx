@@ -33,7 +33,10 @@ const studentSchema = z.object({
   collegeName: z.string().min(1, 'College name is required').max(200),
   degree: z.string().min(1, 'Degree is required').max(100),
   branch: z.string().min(1, 'Branch is required').max(100),
-  graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
+  graduationYear: z.preprocess(
+    (val) => (val === '' || val === undefined || val === null ? undefined : Number(val)),
+    z.number({ required_error: 'Year of passing is required' }).int().min(1990, 'Year must be 1990 or later').max(2100, 'Year must be 2100 or earlier')
+  ),
 });
 
 type StudentFormValues = z.infer<typeof studentSchema>;
@@ -246,7 +249,7 @@ function RegisterContent() {
                       name="graduationYear"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-slate-700 font-medium">Graduation Year (Optional)</FormLabel>
+                          <FormLabel className="text-slate-700 font-medium">Year of Passing *</FormLabel>
                           <FormControl>
                             <Input type="number" placeholder="2026" className="border-slate-200 focus-visible:ring-blue-600 rounded-xl" {...field} value={field.value ?? ''} />
                           </FormControl>

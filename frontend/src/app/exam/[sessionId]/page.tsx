@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload, selectDomain } from '@/services';
+import { fetchSessionDetails, saveAnswer, logWarning, submitSession, heartbeat, SaveAnswerPayload, selectDomain, startAptitudeTimer, endAptitudeRound } from '@/services';
 import { parseQuestionOptions } from '@/utils/questionUtils';
 
 export default function ExamPage() {
@@ -42,10 +42,13 @@ export default function ExamPage() {
     currentQuestionIndexRef.current = currentQuestionIndex;
   }, [currentQuestionIndex]);
 
-  // Timers (seconds remaining)
-  const [aptitudeTimer, setAptitudeTimer] = React.useState(0);
-  const [technicalTimer, setTechnicalTimer] = React.useState(0);
+  // Unified continuous timer state (seconds remaining)
+  const [examTimer, setExamTimer] = React.useState(999999);
   const [showDomainSelection, setShowDomainSelection] = React.useState(false);
+  const [isPaletteCollapsed, setIsPaletteCollapsed] = React.useState(true);
+  const [isCameraCollapsed, setIsCameraCollapsed] = React.useState(true);
+  const [selectedDomainLocal, setSelectedDomainLocal] = React.useState<string | null>(null);
+  const [isTimerHydrated, setIsTimerHydrated] = React.useState(false);
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
@@ -66,6 +69,15 @@ export default function ExamPage() {
     queryFn: () => fetchSessionDetails(sessionId),
   });
 
+  // Start Aptitude timer when Question 1 is first displayed
+  React.useEffect(() => {
+    if (session && session.status === 'IN_PROGRESS' && !session.aptitudeStartedAt) {
+      startAptitudeTimer(sessionId)
+        .then(() => refetch())
+        .catch((err) => console.error('Failed to start aptitude timer:', err));
+    }
+  }, [session, sessionId, refetch]);
+
   const exam = session?.exam;
   const questions: any[] = React.useMemo(
     () => exam?.examQuestions?.map((eq: any) => eq.question) || [],
@@ -76,7 +88,7 @@ export default function ExamPage() {
   // Trigger Domain selection modal when candidate starts technical round and hasn't chosen one
   React.useEffect(() => {
     if (session && !session.selectedDomain && activeSection === 'TECHNICAL') {
-      setShowDomainSelection(true);
+      setTimeout(() => setShowDomainSelection(true), 0);
     }
   }, [session, activeSection]);
 
@@ -251,7 +263,7 @@ export default function ExamPage() {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [session?.exam?.requireCamera, session?.exam?.requireMicrophone]);
+  }, [session?.exam?.requireCamera, session?.exam?.requireMicrophone, warningMutation]);
 
   // Webcam & Microphone Track end / Device Change listeners
   React.useEffect(() => {
@@ -295,7 +307,7 @@ export default function ExamPage() {
       tracks.forEach((track) => track.removeEventListener('ended', handleTrackEnded));
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
-  }, [session, streamRef.current, warningMutation]);
+  }, [session, warningMutation]);
 
   // Enforce Fullscreen overlay & exit warning log
   React.useEffect(() => {
@@ -310,7 +322,9 @@ export default function ExamPage() {
     };
 
     document.addEventListener('fullscreenchange', checkFs);
-    setIsFullscreenActive(document.fullscreenElement !== null);
+    setTimeout(() => {
+      setIsFullscreenActive(document.fullscreenElement !== null);
+    }, 0);
 
     return () => {
       document.removeEventListener('fullscreenchange', checkFs);
@@ -358,6 +372,9 @@ export default function ExamPage() {
 
     const preventClipboard = (e: Event) => {
       e.preventDefault();
+      const type = e.type === 'copy' ? 'COPY_ATTEMPT' : e.type === 'paste' ? 'PASTE_ATTEMPT' : 'OTHER';
+      toast.warning(`${e.type.toUpperCase()} is disabled during the exam.`);
+      warningMutation.mutate({ type, message: `Attempted clipboard action: ${e.type}` });
     };
 
     document.addEventListener('contextmenu', handleContextMenu);
@@ -457,7 +474,7 @@ export default function ExamPage() {
       if (stored !== null) {
         const idx = parseInt(stored, 10);
         if (!isNaN(idx) && idx >= 0 && idx < questions.length) {
-          setCurrentQuestionIndex(idx);
+          setTimeout(() => setCurrentQuestionIndex(idx), 0);
         }
       }
     }
@@ -481,26 +498,31 @@ export default function ExamPage() {
       serverClientOffsetRef.current = new Date(serverTimeStr).getTime() - Date.now();
     }
 
-    const aptDuration = session.exam?.aptitudeDurationSec || 900;
-    const techDuration = session.exam?.technicalDurationSec || 900;
+    const totalDuration = (session.exam?.aptitudeDurationSec || 900) + (session.exam?.technicalDurationSec || 900);
     const wc = session.warningCount;
 
     const currentServerTime = Date.now() + serverClientOffsetRef.current;
     
-    let aptRem = aptDuration;
+    let remaining = totalDuration;
     if (session.aptitudeStartedAt) {
-      const elapsedApt = Math.floor((currentServerTime - new Date(session.aptitudeStartedAt).getTime()) / 1000);
-      aptRem = Math.max(0, aptDuration - elapsedApt);
-    }
-
-    let techRem = techDuration;
-    if (session.technicalStartedAt) {
-      const elapsedTech = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
-      techRem = Math.max(0, techDuration - elapsedTech);
+      if (!session.aptitudeEndedAt) {
+        // Aptitude in progress
+        const elapsed = Math.floor((currentServerTime - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+        remaining = Math.max(0, totalDuration - elapsed);
+      } else if (!session.technicalStartedAt) {
+        // Paused during Domain Selection
+        const elapsedApt = Math.floor((new Date(session.aptitudeEndedAt).getTime() - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+        remaining = Math.max(0, totalDuration - elapsedApt);
+      } else {
+        // Technical in progress
+        const elapsedApt = Math.floor((new Date(session.aptitudeEndedAt).getTime() - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+        const elapsedTech = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
+        remaining = Math.max(0, totalDuration - elapsedApt - elapsedTech);
+      }
     }
 
     let currentSection: 'APTITUDE' | 'TECHNICAL' = 'APTITUDE';
-    if (session.selectedDomain) {
+    if (session.aptitudeEndedAt || session.selectedDomain) {
       currentSection = 'TECHNICAL';
     }
 
@@ -524,20 +546,23 @@ export default function ExamPage() {
       }
     });
 
-    setAptitudeTimer(aptRem);
-    setTechnicalTimer(techRem);
-    setActiveSection(currentSection);
-    setWarningCount(wc);
-    setSelectedAnswers(answersMap);
-    setCodeAnswers(codeMap);
-    setTextAnswers(textMap);
-    setFlaggedQuestions(flaggedMap);
+    setTimeout(() => {
+      // Restore domain selection status on refresh
+      if (session.aptitudeEndedAt && !session.selectedDomain) {
+        setShowDomainSelection(true);
+      } else {
+        setShowDomainSelection(false);
+      }
 
-    // If aptitude timer already expired but domain not selected, force domain selection
-    if (currentSection === 'APTITUDE' && aptRem <= 0) {
-      setShowDomainSelection(true);
-      setActiveSection('TECHNICAL');
-    }
+      setExamTimer(remaining);
+      setIsTimerHydrated(true);
+      setActiveSection(currentSection);
+      setWarningCount(wc);
+      setSelectedAnswers(answersMap);
+      setCodeAnswers(codeMap);
+      setTextAnswers(textMap);
+      setFlaggedQuestions(flaggedMap);
+    }, 0);
   }, [session]);
 
   // Timer tick down
@@ -546,46 +571,56 @@ export default function ExamPage() {
 
     const timer = setInterval(() => {
       const currentServerTime = Date.now() + serverClientOffsetRef.current;
+      const totalDuration = (session.exam?.aptitudeDurationSec || 900) + (session.exam?.technicalDurationSec || 900);
 
-      if (activeSection === 'APTITUDE') {
-        const duration = session.exam?.aptitudeDurationSec || 900;
-        if (session.aptitudeStartedAt) {
+      if (session.aptitudeStartedAt) {
+        if (!session.aptitudeEndedAt) {
+          // Aptitude in progress
           const elapsed = Math.floor((currentServerTime - new Date(session.aptitudeStartedAt).getTime()) / 1000);
-          const rem = Math.max(0, duration - elapsed);
-          setAptitudeTimer(rem);
+          const rem = Math.max(0, totalDuration - elapsed);
+          setExamTimer(rem);
           if (rem <= 0) {
-            setShowDomainSelection(true);
-            setActiveSection('TECHNICAL');
+            // Auto-move to next phase or submit
+            endAptitudeRound(sessionId)
+              .then(() => refetch())
+              .catch(console.error);
           }
-        }
-      } else {
-        const duration = session.exam?.technicalDurationSec || 900;
-        if (session.technicalStartedAt) {
-          const elapsed = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
-          const rem = Math.max(0, duration - elapsed);
-          setTechnicalTimer(rem);
+        } else if (!session.technicalStartedAt) {
+          // Paused during Domain Selection - remaining time stays visible and doesn't decrement
+          const elapsedApt = Math.floor((new Date(session.aptitudeEndedAt).getTime() - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+          const rem = Math.max(0, totalDuration - elapsedApt);
+          setExamTimer(rem);
+        } else {
+          // Technical in progress - resumes from remaining time
+          const elapsedApt = Math.floor((new Date(session.aptitudeEndedAt).getTime() - new Date(session.aptitudeStartedAt).getTime()) / 1000);
+          const elapsedTech = Math.floor((currentServerTime - new Date(session.technicalStartedAt).getTime()) / 1000);
+          const rem = Math.max(0, totalDuration - elapsedApt - elapsedTech);
+          setExamTimer(rem);
           if (rem <= 0) {
-            submitMutation.mutate(true); // Auto-submit when technical timer hits 0
+            submitMutation.mutate(true); // Auto-submit when time expires
           }
         }
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [session, activeSection]);
+  }, [session, sessionId, refetch, submitMutation]);
 
   // Auto submit when time expires
   React.useEffect(() => {
-    if (!session || session.status !== 'IN_PROGRESS' || session.exam?.totalDurationSec) return;
+    if (!session || session.status !== 'IN_PROGRESS' || !isTimerHydrated) return;
 
-    if (activeSection === 'APTITUDE' && aptitudeTimer === 0) {
-      setActiveSection('TECHNICAL');
+    if (examTimer <= 0) {
+      const currentSection = session.aptitudeEndedAt ? 'TECHNICAL' : 'APTITUDE';
+      if (currentSection === 'APTITUDE') {
+        endAptitudeRound(sessionId)
+          .then(() => refetch())
+          .catch(console.error);
+      } else {
+        submitMutation.mutate(true);
+      }
     }
-
-    if (activeSection === 'TECHNICAL' && technicalTimer === 0) {
-      submitMutation.mutate(true);
-    }
-  }, [activeSection, aptitudeTimer, technicalTimer, session, submitMutation]);
+  }, [examTimer, session, sessionId, refetch, submitMutation, isTimerHydrated]);
 
   if (isLoading || !session) {
     return (
@@ -638,8 +673,15 @@ export default function ExamPage() {
 
   const handleNext = () => {
     if (activeSection === 'APTITUDE' && currentQuestionIndex === 14) {
-      setShowDomainSelection(true);
-      setActiveSection('TECHNICAL');
+      endAptitudeRound(sessionId)
+        .then(() => {
+          setShowDomainSelection(true);
+          setActiveSection('TECHNICAL');
+          return refetch();
+        })
+        .catch(() => {
+          toast.error('Failed to end Aptitude section');
+        });
       return;
     }
     if (currentQuestionIndex < questions.length - 1) {
@@ -651,7 +693,6 @@ export default function ExamPage() {
     if (activeSection === 'TECHNICAL' && !showDomainSelection) {
       const techIdx = questions.findIndex((q) => q.type === 'TECHNICAL');
       if (currentQuestionIndex === techIdx) {
-        // First technical question, clicking back does nothing or toast
         toast.info('You cannot return to the Aptitude section.');
         return;
       }
@@ -721,14 +762,14 @@ export default function ExamPage() {
       )}
 
       {/* Header bar */}
-      <header className="h-16 border-b border-border bg-card px-6 flex items-center justify-between shrink-0">
+      <header className="flex flex-col sm:flex-row border-b border-border bg-card px-4 sm:px-6 py-3 sm:py-0 sm:h-16 items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <ShieldCheck className="size-5 text-primary" />
           <span className="font-display font-semibold truncate max-w-xs">{exam?.title}</span>
         </div>
 
         {/* Section Tabs */}
-        <div className="flex border rounded overflow-hidden text-xs font-semibold bg-muted/30">
+        <div className="flex border rounded overflow-hidden text-[10px] sm:text-xs font-semibold bg-muted/30 flex-wrap">
           <button
             onClick={() => handleJumpToSection('APTITUDE')}
             disabled={activeSection === 'TECHNICAL'}
@@ -750,11 +791,11 @@ export default function ExamPage() {
         </div>
 
         {/* Timer status */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 font-mono font-semibold text-lg bg-primary/10 text-primary px-3 py-1.5 rounded-lg border border-primary/20">
+        <div className="flex items-center gap-3 sm:gap-6">
+          <div className="flex items-center gap-2 font-mono font-semibold text-sm sm:text-lg bg-primary/10 text-primary px-3 py-1.5 rounded-lg border border-primary/20">
             <Clock className="size-4 animate-pulse" />
             <span>
-              {activeSection === 'APTITUDE' ? formatTimer(aptitudeTimer) : formatTimer(technicalTimer)}
+              {formatTimer(examTimer)}
             </span>
           </div>
 
@@ -791,45 +832,68 @@ export default function ExamPage() {
                 {(session?.configuredDomains && session.configuredDomains.length > 0
                   ? session.configuredDomains
                   : ['Java Full Stack', 'Python Full Stack', 'MERN Stack', 'Data Science']
-                ).map((dom: string) => (
-                  <button
-                    key={dom}
-                    onClick={async () => {
-                      try {
-                        await selectDomain(sessionId, dom);
-                        toast.success(`Track selected: ${dom}`);
-                        setShowDomainSelection(false);
-                        await refetch();
-                        setActiveSection('TECHNICAL');
-                      } catch (err) {
-                        toast.error('Unable to set domain specialization');
-                      }
-                    }}
-                    className="p-5 border border-slate-200 rounded-2xl bg-card hover:bg-blue-50/50 hover:border-blue-500 text-left transition-all duration-300 group shadow-sm flex flex-col justify-between"
-                  >
-                    <div>
-                      <h4 className="font-semibold text-sm text-slate-900 group-hover:text-blue-600 transition-colors">
-                        {dom}
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                        Access technical questions and exercises specifically for the {dom} track.
-                      </p>
-                    </div>
-                    <span className="text-blue-600 font-semibold text-xs mt-4 inline-flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                      Select Track &rarr;
-                    </span>
-                  </button>
-                ))}
+                ).map((dom: string) => {
+                  const isSelected = selectedDomainLocal === dom;
+                  return (
+                    <button
+                      key={dom}
+                      type="button"
+                      onClick={() => setSelectedDomainLocal(dom)}
+                      className={`p-5 border rounded-2xl text-left transition-all duration-300 flex flex-col justify-between group shadow-sm ${
+                        isSelected
+                          ? 'bg-primary/5 border-primary ring-1 ring-primary'
+                          : 'bg-card border-slate-200 hover:bg-blue-50/50 hover:border-blue-500'
+                      }`}
+                    >
+                      <div>
+                        <h4 className={`font-semibold text-sm transition-colors ${
+                          isSelected ? 'text-primary font-bold' : 'text-slate-900 group-hover:text-blue-600'
+                        }`}>
+                          {dom}
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                          Access technical questions and exercises specifically for the {dom} track.
+                        </p>
+                      </div>
+                      <span className={`font-semibold text-xs mt-4 inline-flex items-center gap-1 transition-all ${
+                        isSelected ? 'text-primary font-bold' : 'text-blue-600 group-hover:translate-x-1'
+                      }`}>
+                        {isSelected ? '✓ Selected' : 'Select Track →'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-center pt-8 border-t border-border/50 mt-6">
+                <Button
+                  onClick={async () => {
+                    if (!selectedDomainLocal) {
+                      toast.error('Please select a domain specialization track.');
+                      return;
+                    }
+                    try {
+                      await selectDomain(sessionId, selectedDomainLocal);
+                      toast.success(`Track selected: ${selectedDomainLocal}`);
+                      setShowDomainSelection(false);
+                      await refetch();
+                      setActiveSection('TECHNICAL');
+                    } catch (err: any) {
+                      toast.error(err.response?.data?.message || 'Unable to set domain specialization');
+                    }
+                  }}
+                  disabled={!selectedDomainLocal}
+                  className="w-full sm:w-64 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-6 text-base"
+                >
+                  Continue to Technical Section
+                </Button>
               </div>
             </div>
           ) : activeQuestion ? (
             <div className="space-y-6 max-w-3xl w-full mx-auto">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-muted-foreground">
-                  Question {currentQuestionIndex + 1} of {questions.length} ({activeQuestion.domain} - {activeQuestion.topic || ''})
-                </span>
-                <span className="text-xs font-medium text-muted-foreground bg-secondary px-2.5 py-1 rounded">
-                  Difficulty: {activeQuestion.difficulty} | Marks: {activeQuestion.marks}
+                  Question {currentQuestionIndex + 1} of {questions.length}
                 </span>
               </div>
 
@@ -940,7 +1004,16 @@ export default function ExamPage() {
                 {currentQuestionIndex === questions.length - 1 ? (
                   activeSection === 'APTITUDE' ? (
                     <Button
-                      onClick={() => setShowDomainSelection(true)}
+                      onClick={async () => {
+                        try {
+                          await endAptitudeRound(sessionId);
+                          setShowDomainSelection(true);
+                          setActiveSection('TECHNICAL');
+                          await refetch();
+                        } catch {
+                          toast.error('Failed to end Aptitude section');
+                        }
+                      }}
                       className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
                     >
                       <span>Proceed to Technical Section</span>
@@ -971,8 +1044,30 @@ export default function ExamPage() {
         </main>
 
         {/* Right Side: Palette and Video Stream */}
-        <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-white p-4 sm:p-5 flex flex-col justify-between shrink-0 max-h-64 lg:max-h-none overflow-y-auto">
-          <div className="space-y-6">
+        <aside className="w-full lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-white p-4 sm:p-5 flex flex-col justify-between shrink-0 lg:max-h-none overflow-y-auto">
+          {/* Mobile Toggles */}
+          <div className="flex gap-2 lg:hidden mb-4 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 text-xs"
+              onClick={() => setIsPaletteCollapsed(p => !p)}
+            >
+              {isPaletteCollapsed ? 'Show Palette' : 'Hide Palette'}
+            </Button>
+            {exam?.requireCamera && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 text-xs"
+                onClick={() => setIsCameraCollapsed(c => !c)}
+              >
+                {isCameraCollapsed ? 'Show Camera' : 'Hide Camera'}
+              </Button>
+            )}
+          </div>
+
+          <div className={`space-y-6 ${isPaletteCollapsed ? 'hidden lg:block' : 'block'}`}>
             <div className="flex items-center justify-between">
               <h3 className="font-display font-semibold text-sm">Question Palette</h3>
               <span className="text-xs text-muted-foreground font-medium">{questions.length} Questions</span>
@@ -1045,7 +1140,7 @@ export default function ExamPage() {
 
           {/* Floating visual proctor container */}
           {exam?.requireCamera && (
-            <div className="border border-border/80 rounded-xl overflow-hidden shadow-md bg-black aspect-video relative flex items-center justify-center mt-4">
+            <div className={`border border-border/80 rounded-xl overflow-hidden shadow-md bg-black aspect-video relative flex items-center justify-center mt-4 ${isCameraCollapsed ? 'hidden lg:flex' : 'flex'}`}>
               <video
                 ref={videoRef}
                 autoPlay

@@ -30,7 +30,7 @@ export const candidateRegisterSchema = z.object({
     degree: z.string().max(100).optional().or(z.literal('')),
     branch: z.string().max(100).optional().or(z.literal('')),
     yearOfStudy: z.string().max(100).optional().or(z.literal('')),
-    graduationYear: z.coerce.number().int().min(1990).max(2100).optional(),
+    graduationYear: z.coerce.number().int().min(1990, 'Year must be 1990 or later').max(2100, 'Year must be 2100 or earlier'),
     qrRef: z.string().max(200).optional(), // opaque reference captured from a scanned QR poster
     examId: z.string().uuid().optional(),
     examToken: z.string().optional(),

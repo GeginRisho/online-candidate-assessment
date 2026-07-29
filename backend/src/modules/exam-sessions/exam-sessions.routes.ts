@@ -79,6 +79,13 @@ sessionsRouter.post(
   sessionsController.approveAllCandidates,
 );
 
+sessionsRouter.delete(
+  '/candidates/:candidateId',
+  requireAuth,
+  requireRole('ADMIN'),
+  sessionsController.deleteCandidate,
+);
+
 sessionsRouter.post(
   '/:id/allow-reattempt',
   requireAuth,
@@ -148,4 +155,16 @@ sessionsRouter.post(
   optionalAuth,
   validate(selectDomainSchema),
   sessionsController.selectDomain,
+);
+
+sessionsRouter.post(
+  '/:id/start-timer',
+  optionalAuth,
+  sessionsController.startTimer,
+);
+
+sessionsRouter.post(
+  '/:id/end-aptitude',
+  optionalAuth,
+  sessionsController.endAptitude,
 );

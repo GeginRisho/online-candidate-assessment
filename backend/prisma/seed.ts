@@ -348,6 +348,270 @@ const defaultAptitudeQuestions: DefaultQuestionInput[] = [
   },
 ];
 
+const generatedOptionsMap: Record<string, { options: { id: string; text: string }[]; correctOptId: string }> = {
+  "enps (employee net promoter score)": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "eNPS (Employee Net Promoter Score)" },
+      { id: "B", text: "ENTR (Employee Turnover Rate)" },
+      { id: "C", text: "ESI (Employee Satisfaction Index)" },
+      { id: "D", text: "EEG (Employee Engagement Gauge)" }
+    ]
+  },
+  "~44x44 pt": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "~32x32 pt" },
+      { id: "B", text: "~44x44 pt" },
+      { id: "C", text: "~48x48 pt" },
+      { id: "D", text: "~50x50 pt" }
+    ]
+  },
+  "at least 4.5:1": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "At least 3:1" },
+      { id: "B", text: "At least 4.5:1" },
+      { id: "C", text: "At least 7:1" },
+      { id: "D", text: "At least 5:1" }
+    ]
+  },
+  "the peak-end rule": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "The Primacy Effect" },
+      { id: "B", text: "The Recency Effect" },
+      { id: "C", text: "The Peak-End Rule" },
+      { id: "D", text: "The Zeigarnik Effect" }
+    ]
+  },
+  "hick's law": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Fitts's Law" },
+      { id: "B", text: "Hick's Law" },
+      { id: "C", text: "Miller's Law" },
+      { id: "D", text: "Jakob's Law" }
+    ]
+  },
+  "fitts's law": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Fitts's Law" },
+      { id: "B", text: "Hick's Law" },
+      { id: "C", text: "Miller's Law" },
+      { id: "D", text: "Gestalt Law" }
+    ]
+  },
+  "amazon s3": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Amazon EC2" },
+      { id: "B", text: "Amazon EBS" },
+      { id: "C", text: "Amazon S3" },
+      { id: "D", text: "Amazon RDS" }
+    ]
+  },
+  "recovery time objective": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Recovery Time Objective" },
+      { id: "B", text: "Response Time Optimization" },
+      { id: "C", text: "Redundant Tunnel Operation" },
+      { id: "D", text: "Real-time Output" }
+    ]
+  },
+  "recovery point objective": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Recovery Point Objective" },
+      { id: "B", text: "Restore Point Organization" },
+      { id: "C", text: "Redundant Power Option" },
+      { id: "D", text: "Real-time Process Orchestration" }
+    ]
+  },
+  "terraform (or aws cloudformation)": {
+    correctOptId: "D",
+    options: [
+      { id: "A", text: "Docker" },
+      { id: "B", text: "Kubernetes" },
+      { id: "C", text: "Jenkins" },
+      { id: "D", text: "Terraform (or AWS CloudFormation)" }
+    ]
+  },
+  "443": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "80" },
+      { id: "B", text: "443" },
+      { id: "C", text: "8080" },
+      { id: "D", text: "22" }
+    ]
+  },
+  "confidentiality, integrity, availability": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Confidentiality, Integrity, Availability" },
+      { id: "B", text: "Control, Identity, Authentication" },
+      { id: "C", text: "Cybersecurity, Intrusion, Attack" },
+      { id: "D", text: "Cryptography, Inspection, Authority" }
+    ]
+  },
+  "salting": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Pepper" },
+      { id: "B", text: "Salting" },
+      { id: "C", text: "Padding" },
+      { id: "D", text: "Key Stretching" }
+    ]
+  },
+  "sql injection": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Cross-Site Scripting (XSS)" },
+      { id: "B", text: "SQL Injection" },
+      { id: "C", text: "CSRF" },
+      { id: "D", text: "Directory Traversal" }
+    ]
+  },
+  "zero- day vulnerability": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Zero- day vulnerability" },
+      { id: "B", text: "Backdoor" },
+      { id: "C", text: "Exploitation code" },
+      { id: "D", text: "Buffer Overflow" }
+    ]
+  },
+  "a unit of text (word/subword/character piece) the model processes as input/output": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "A security key for API access" },
+      { id: "B", text: "A unit of text (word/subword/character piece) the model processes as input/output" },
+      { id: "C", text: "A database primary key" },
+      { id: "D", text: "A deep learning neuron weights matrix" }
+    ]
+  },
+  "rlhf -- 26 of 43 -- (reinforcement learning from human feedback)": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Supervised Fine-Tuning (SFT)" },
+      { id: "B", text: "Unsupervised Pre-training" },
+      { id: "C", text: "RLHF (Reinforcement Learning from Human Feedback)" },
+      { id: "D", text: "Zero-shot prompting" }
+    ]
+  },
+  "attention mechanism": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Convolution layer" },
+      { id: "B", text: "Recurrent loop" },
+      { id: "C", text: "Attention mechanism" },
+      { id: "D", text: "Pooling function" }
+    ]
+  },
+  "hallucination": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Overfitting" },
+      { id: "B", text: "Hallucination" },
+      { id: "C", text: "Underfitting" },
+      { id: "D", text: "Latent shift" }
+    ]
+  },
+  "prompt injection": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Prompt injection" },
+      { id: "B", text: "Data poisoning" },
+      { id: "C", text: "Adversarial training" },
+      { id: "D", text: "Model inversion" }
+    ]
+  },
+  "ctr = (clicks / impressions) × 100": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "CTR = (Clicks * Impressions) / 100" },
+      { id: "B", text: "CTR = (Clicks / Impressions) × 100" },
+      { id: "C", text: "CTR = (Impressions / Clicks) * 100" },
+      { id: "D", text: "Clicks / Conversions * 100" }
+    ]
+  },
+  "cost per 1000 (mille) impressions": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Cost Per Million" },
+      { id: "B", text: "Cost Per Click" },
+      { id: "C", text: "Cost Per 1000 (Mille) Impressions" },
+      { id: "D", text: "Customer Placement Metric" }
+    ]
+  },
+  "retargeting (remarketing)": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Cold outreach" },
+      { id: "B", text: "Lead generation" },
+      { id: "C", text: "Retargeting (Remarketing)" },
+      { id: "D", text: "Affiliation marketing" }
+    ]
+  },
+  "top, middle, bottom of funnel": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Top, Middle, Bottom of Funnel" },
+      { id: "B", text: "Trust, Opinion, Focus, Unity" },
+      { id: "C", text: "Traffic, Optimization, Feedback, Usefulness" },
+      { id: "D", text: "Target, Objective, Forecast, Utility" }
+    ]
+  },
+  "customer lifetime value (ltv)": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Cost Per Acquisition (CPA)" },
+      { id: "B", text: "Customer Lifetime Value (LTV)" },
+      { id: "C", text: "Return on Ad Spend (ROAS)" },
+      { id: "D", text: "Conversion Value" }
+    ]
+  },
+  "performance improvement plan": {
+    correctOptId: "A",
+    options: [
+      { id: "A", text: "Performance Improvement Plan" },
+      { id: "B", text: "Personal Initiative Program" },
+      { id: "C", text: "Peer Inspection Process" },
+      { id: "D", text: "Professional Incentive Package" }
+    ]
+  },
+  "attrition rate": {
+    correctOptId: "B",
+    options: [
+      { id: "A", text: "Retention rate" },
+      { id: "B", text: "Attrition rate" },
+      { id: "C", text: "Onboarding speed" },
+      { id: "D", text: "Acquisition cost" }
+    ]
+  },
+  "constructive dismissal": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Retaliatory termination" },
+      { id: "B", text: "Voluntary severance" },
+      { id: "C", text: "Constructive dismissal" },
+      { id: "D", text: "Mutual separation" }
+    ]
+  },
+  "succession planning": {
+    correctOptId: "C",
+    options: [
+      { id: "A", text: "Talent acquisition" },
+      { id: "B", text: "Performance appraisal" },
+      { id: "C", text: "Succession planning" },
+      { id: "D", text: "Offboarding review" }
+    ]
+  }
+};
+
 async function parsePdfQuestions(adminId: string) {
   const quizPath = path.resolve(__dirname, '../../assets/question-bank/Tech_Domains_Mixed_Quiz.pdf');
   const buffer = fs.readFileSync(quizPath);
@@ -436,6 +700,16 @@ async function parsePdfQuestions(adminId: string) {
         }
       } else if (qType === 'CODING') {
         format = QuestionFormat.CODING;
+      }
+
+      if (format === QuestionFormat.DESCRIPTIVE) {
+        const normalizedAns = answerText.toLowerCase().trim().replace(/\s+/g, ' ');
+        const matchedObj = generatedOptionsMap[normalizedAns];
+        if (matchedObj) {
+          format = QuestionFormat.MCQ_SINGLE;
+          options = matchedObj.options;
+          answerText = matchedObj.correctOptId;
+        }
       }
 
       parsedQuestions.push({

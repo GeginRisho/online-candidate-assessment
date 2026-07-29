@@ -174,3 +174,25 @@ export const allowReattempt = asyncHandler(async (req: Request, res: Response) =
   const result = await sessionsService.allowReattempt(id, reason, req.user.id);
   sendSuccess(res, result, 'Candidate reattempt granted successfully');
 });
+
+export const startTimer = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await sessionsService.startAptitudeTimer(id, req.user?.id);
+  sendSuccess(res, result, 'Aptitude timer started successfully');
+});
+
+export const endAptitude = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await sessionsService.endAptitudeRound(id, req.user?.id);
+  sendSuccess(res, result, 'Aptitude section completed successfully');
+});
+
+export const deleteCandidate = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    throw new UnauthorizedError('Admin login required');
+  }
+  const { candidateId } = req.params;
+  const result = await sessionsService.deleteCandidate(candidateId);
+  sendSuccess(res, result, 'Candidate profile and assessment data deleted successfully');
+});
+

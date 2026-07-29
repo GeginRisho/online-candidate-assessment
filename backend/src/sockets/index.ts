@@ -128,10 +128,12 @@ export function getSocketServer(): SocketIOServer {
 
 /** Broadcast a live-monitoring event to all admins watching a given exam. */
 export function emitToMonitors(examId: string, event: string, payload: unknown): void {
+  if (!io) return;
   getSocketServer().to(`monitor:${examId}`).emit(event, payload);
 }
 
 /** Push a server-initiated event to a specific candidate's session room. */
 export function emitToSession(examSessionId: string, event: string, payload: unknown): void {
+  if (!io) return;
   getSocketServer().to(`session:${examSessionId}`).emit(event, payload);
 }

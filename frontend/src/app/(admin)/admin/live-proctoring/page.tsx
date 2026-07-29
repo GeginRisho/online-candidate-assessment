@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -17,6 +18,14 @@ import { apiClient } from '@/services/apiClient';
 
 export default function LiveProctoringPage() {
   const queryClient = useQueryClient();
+  const [currentTime, setCurrentTime] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['admin-proctoring-sessions'],
@@ -135,10 +144,10 @@ export default function LiveProctoringPage() {
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {activeSessions.map((s: any) => {
               const c = s.candidate;
-              const isOnline = s.status === 'IN_PROGRESS' && s.lastHeartbeatAt && (Date.now() - new Date(s.lastHeartbeatAt).getTime() < 30000);
+              const isOnline = s.status === 'IN_PROGRESS' && s.lastHeartbeatAt && (currentTime - new Date(s.lastHeartbeatAt).getTime() < 30000);
               
               const totalDurationSec = (s.exam?.aptitudeDurationSec || 0) + (s.exam?.technicalDurationSec || 0);
-              const elapsedSec = s.startedAt ? Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 1000) : 0;
+              const elapsedSec = s.startedAt ? Math.floor((currentTime - new Date(s.startedAt).getTime()) / 1000) : 0;
               const timeRemainingSec = Math.max(0, totalDurationSec - elapsedSec);
               
               const formatTimeRemaining = (sec: number) => {

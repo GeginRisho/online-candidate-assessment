@@ -33,7 +33,9 @@ export interface ExamSession {
   status: 'NOT_STARTED' | 'IN_PROGRESS' | 'PAUSED' | 'SUBMITTED' | 'AUTO_SUBMITTED' | 'DISQUALIFIED' | 'EXPIRED';
   startedAt: string | null;
   aptitudeStartedAt?: string | null;
+  aptitudeEndedAt?: string | null;
   technicalStartedAt?: string | null;
+  technicalEndedAt?: string | null;
   endedAt: string | null;
   warningCount: number;
   isDisqualified: boolean;
@@ -177,3 +179,19 @@ export async function allowReattempt(sessionId: string, reason: string): Promise
   const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/allow-reattempt`, { reason });
   return data.data;
 }
+
+export async function startAptitudeTimer(sessionId: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/start-timer`);
+  return data.data;
+}
+
+export async function endAptitudeRound(sessionId: string): Promise<any> {
+  const { data } = await apiClient.post<ApiSuccessResponse<any>>(`/exam-sessions/${sessionId}/end-aptitude`);
+  return data.data;
+}
+
+export async function deleteCandidate(candidateId: string): Promise<any> {
+  const { data } = await apiClient.delete<ApiSuccessResponse<any>>(`/exam-sessions/candidates/${candidateId}`);
+  return data.data;
+}
+

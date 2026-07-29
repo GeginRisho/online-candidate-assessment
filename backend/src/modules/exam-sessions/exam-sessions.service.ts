@@ -130,46 +130,8 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
 
   if (!session) throw new NotFoundError('Exam session not found');
 
-  // Initialize start times when candidate loads the exam page for the first time
-  if (role === 'CANDIDATE' && session.status === 'IN_PROGRESS' && !session.aptitudeStartedAt) {
-    session = await prisma.examSession.update({
-      where: { id },
-      data: {
-        startedAt: new Date(),
-        aptitudeStartedAt: new Date(),
-      },
-      include: {
-        exam: {
-          include: {
-            examQuestions: {
-              orderBy: { order: 'asc' },
-              include: {
-                question: true,
-              },
-            },
-          },
-        },
-        candidate: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            collegeName: true,
-            branch: true,
-            degree: true,
-            yearOfStudy: true,
-            status: true,
-          },
-        },
-        answers: {
-          include: {
-            question: true,
-          },
-        },
-        warnings: true,
-      },
-    });
-  }
+  // Auto-start of aptitude round has been removed from details loading
+  // to ensure the timer only starts when Question 1 is displayed.
 
   // Lazily initialize aptitude questions if none exist and session is in progress
   const hasAptitudeAnswers = session.answers.some(a => a.question.type === 'APTITUDE');
@@ -293,11 +255,19 @@ export async function getSessionDetails(id: string, role: 'ADMIN' | 'CANDIDATE')
     });
   }
 
+  // Fetch active domains from the database to only display active domains
+  const activeDomains = await prisma.domain.findMany({
+    where: { isActive: true },
+    select: { name: true }
+  });
+  const activeDomainNames = activeDomains.map(d => d.name);
+
   // Get available domains configured for this exam based on assigned technical questions
   const allTechnicalQuestions = session.exam.examQuestions
     .map((eq) => eq.question)
     .filter((q) => q.type === 'TECHNICAL');
-  const configuredDomains = Array.from(new Set(allTechnicalQuestions.map((q) => q.domain)));
+  const configuredDomains = Array.from(new Set(allTechnicalQuestions.map((q) => q.domain)))
+    .filter(name => activeDomainNames.includes(name));
 
   // Candidate filtering based on domain selection
   let finalQuestions = cleanQuestions;
@@ -1071,8 +1041,19 @@ export async function startCandidateExam(candidateId: string) {
   });
   if (!candidate) throw new NotFoundError('Candidate not found');
 
+  if (candidate.status !== 'APPROVED' && candidate.status !== 'WAITING_APPROVAL') {
+    throw new BadRequestError('Candidate is not in a valid state (APPROVED or WAITING_APPROVAL) to start the exam.');
+  }
+
   const session = candidate.examSessions[0];
-  if (!session) throw new NotFoundError('Candidate exam session not found');
+  if (!session) throw new BadRequestError('Candidate exam session not found');
+
+  const examQuestionsCount = await prisma.examQuestion.count({
+    where: { examId: session.examId },
+  });
+  if (examQuestionsCount === 0) {
+    throw new BadRequestError('Cannot start exam: The question paper has not been generated successfully (no questions mapped).');
+  }
 
   const updatedCandidate = await prisma.candidate.update({
     where: { id: candidateId },
@@ -1119,6 +1100,18 @@ export async function selectDomain(sessionId: string, domain: string) {
     },
   });
   if (!session) throw new NotFoundError('Session not found');
+
+  if (session.selectedDomain) {
+    throw new BadRequestError('Domain specialization has already been selected and locked.');
+  }
+
+  // Verify that the domain exists and is active in the database
+  const dbDomain = await prisma.domain.findUnique({
+    where: { name: domain },
+  });
+  if (!dbDomain || !dbDomain.isActive) {
+    throw new BadRequestError(`Domain '${domain}' is not active or available.`);
+  }
 
   const allTechnicalQuestions = session.exam.examQuestions
     .map((eq) => eq.question)
@@ -1260,6 +1253,11 @@ export async function allowReattempt(sessionId: string, reason: string | undefin
     throw new BadRequestError('Maximum attempts reached. Only one reattempt is allowed.');
   }
 
+  const allowedStatuses: ExamSessionStatus[] = ['SUBMITTED', 'AUTO_SUBMITTED', 'DISQUALIFIED'];
+  if (!allowedStatuses.includes(session.status)) {
+    throw new BadRequestError('Allowing a second attempt is only permitted for candidates with completed or disqualified sessions.');
+  }
+
   // 1. Delete associated Result if any
   await prisma.result.deleteMany({
     where: { examSessionId: sessionId },
@@ -1316,3 +1314,70 @@ export async function allowReattempt(sessionId: string, reason: string | undefin
 
   return updatedSession;
 }
+
+export async function startAptitudeTimer(sessionId: string, candidateId?: string) {
+  const session = await prisma.examSession.findUnique({
+    where: { id: sessionId },
+  });
+  if (!session) throw new NotFoundError('Exam session not found');
+
+  if (candidateId && session.candidateId !== candidateId) {
+    throw new ForbiddenError('Unauthorized session access');
+  }
+
+  if (!session.aptitudeStartedAt) {
+    const now = new Date();
+    return await prisma.examSession.update({
+      where: { id: sessionId },
+      data: {
+        startedAt: now,
+        aptitudeStartedAt: now,
+      },
+    });
+  }
+
+  return session;
+}
+
+export async function endAptitudeRound(sessionId: string, candidateId?: string) {
+  const session = await prisma.examSession.findUnique({
+    where: { id: sessionId },
+  });
+  if (!session) throw new NotFoundError('Exam session not found');
+
+  if (candidateId && session.candidateId !== candidateId) {
+    throw new ForbiddenError('Unauthorized session access');
+  }
+
+  if (!session.aptitudeEndedAt) {
+    return await prisma.examSession.update({
+      where: { id: sessionId },
+      data: {
+        aptitudeEndedAt: new Date(),
+      },
+    });
+  }
+
+  return session;
+}
+
+export async function deleteCandidate(candidateId: string) {
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: candidateId },
+  });
+  if (!candidate) throw new NotFoundError('Candidate not found');
+
+  // Delete AuditLogs for this candidate first (no Cascade onDelete relation)
+  // then delete candidate itself which cascades to everything else
+  await prisma.$transaction([
+    prisma.auditLog.deleteMany({
+      where: { candidateId },
+    }),
+    prisma.candidate.delete({
+      where: { id: candidateId },
+    }),
+  ]);
+
+  return { success: true };
+}
+

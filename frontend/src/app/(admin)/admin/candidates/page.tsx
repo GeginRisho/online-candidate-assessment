@@ -30,7 +30,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { fetchAllCandidateSessionsAdmin, approveCandidate, rejectCandidate, startCandidateExam } from '@/services';
+import { fetchAllCandidateSessionsAdmin, startCandidateExam, deleteCandidate } from '@/services';
 import { apiClient } from '@/services/apiClient';
 
 function StatusBadge({ status }: { status: string }) {
@@ -142,30 +142,6 @@ export default function CandidatesPage() {
     },
   });
 
-  const approveMutation = useMutation({
-    mutationFn: approveCandidate,
-    onSuccess: () => {
-      toast.success('Candidate approved successfully');
-      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
-      setSelectedSession(null);
-    },
-    onError: (err: any) => {
-      toast.error('Failed to approve candidate: ' + (err.response?.data?.message || err.message));
-    },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: rejectCandidate,
-    onSuccess: () => {
-      toast.success('Candidate registration rejected');
-      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
-      setSelectedSession(null);
-    },
-    onError: (err: any) => {
-      toast.error('Failed to reject candidate: ' + (err.response?.data?.message || err.message));
-    },
-  });
-
   const startExamMutation = useMutation({
     mutationFn: startCandidateExam,
     onSuccess: () => {
@@ -177,6 +153,19 @@ export default function CandidatesPage() {
       toast.error('Failed to start candidate exam: ' + (err.response?.data?.message || err.message));
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteCandidate,
+    onSuccess: () => {
+      toast.success('Candidate and all associated data deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-candidate-sessions'] });
+      setSelectedSession(null);
+    },
+    onError: (err: any) => {
+      toast.error('Failed to delete candidate: ' + (err.response?.data?.message || err.message));
+    },
+  });
+
 
   const resetMutation = useMutation({
     mutationFn: ({ sessionId, reason }: { sessionId: string; reason: string }) =>
@@ -347,6 +336,17 @@ export default function CandidatesPage() {
                                 <Ban className="size-3.5" /><span>DQ</span>
                               </Button>
                             )}
+                            <Button
+                              variant="ghost" size="sm"
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 gap-1 text-xs h-8"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete candidate ${c?.fullName}? This will permanently remove their profile, session, answers, results, warnings, and audit logs.`)) {
+                                  deleteMutation.mutate(c.id);
+                                }
+                              }}
+                            >
+                              <XCircle className="size-3.5" /><span>Delete</span>
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -390,6 +390,17 @@ export default function CandidatesPage() {
                         <Ban className="size-3.5" />DQ
                       </Button>
                     )}
+                    <Button
+                      variant="ghost" size="sm"
+                      className="text-red-600 hover:bg-red-50 gap-1 text-xs h-8 flex-1 sm:flex-none"
+                      onClick={() => {
+                        if (confirm(`Are you sure you want to delete candidate ${c?.fullName}? This will permanently remove their profile, session, answers, results, warnings, and audit logs.`)) {
+                          deleteMutation.mutate(c.id);
+                        }
+                      }}
+                    >
+                      <XCircle className="size-3.5" />Delete
+                    </Button>
                   </div>
                 </Card>
               );
@@ -425,14 +436,12 @@ export default function CandidatesPage() {
           {selectedSession && (
             <CandidateDetailsContent
               session={selectedSession}
-              onApprove={(cid) => approveMutation.mutate(cid)}
-              onReject={(cid) => rejectMutation.mutate(cid)}
               onStartExam={(cid) => startExamMutation.mutate(cid)}
               onReset={(sid, reason) => resetMutation.mutate({ sessionId: sid, reason })}
-              isApprovePending={approveMutation.isPending}
-              isRejectPending={rejectMutation.isPending}
+              onDelete={(cid) => deleteMutation.mutate(cid)}
               isStartExamPending={startExamMutation.isPending}
               isResetPending={resetMutation.isPending}
+              isDeletePending={deleteMutation.isPending}
             />
           )}
         </DialogContent>
@@ -443,24 +452,20 @@ export default function CandidatesPage() {
 
 function CandidateDetailsContent({
   session,
-  onApprove,
-  onReject,
   onStartExam,
   onReset,
-  isApprovePending,
-  isRejectPending,
+  onDelete,
   isStartExamPending,
   isResetPending,
+  isDeletePending,
 }: {
   session: any;
-  onApprove: (cid: string) => void;
-  onReject: (cid: string) => void;
   onStartExam: (cid: string) => void;
   onReset: (sid: string, reason: string) => void;
-  isApprovePending: boolean;
-  isRejectPending: boolean;
+  onDelete: (cid: string) => void;
   isStartExamPending: boolean;
   isResetPending: boolean;
+  isDeletePending: boolean;
 }) {
   const c = session.candidate;
   const ex = session.exam;
@@ -599,39 +604,20 @@ function CandidateDetailsContent({
 
       {/* Admin Actions Panel */}
       {['WAITING_APPROVAL', 'REGISTERED', 'APPROVED', 'VERIFIED', 'COMPLETED', 'DISQUALIFIED', 'ABSENT', 'REJECTED', 'SUBMITTED'].includes(c?.status) && (
-        <div className="flex items-center justify-end gap-2 pt-4 border-t border-border mt-6 bg-slate-50 p-4 rounded-xl">
-          {['WAITING_APPROVAL', 'REGISTERED'].includes(c?.status) && (
-            <>
-              <Button
-                size="sm"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg gap-1.5"
-                onClick={() => onApprove(c.id)}
-                disabled={isApprovePending}
-              >
-                <CheckCircle2 className="size-3.5" />
-                Approve Candidate
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 font-medium text-xs rounded-lg gap-1.5"
-                onClick={() => onReject(c.id)}
-                disabled={isRejectPending}
-              >
-                <XCircle className="size-3.5" />
-                Reject
-              </Button>
-            </>
-          )}
-          {['APPROVED', 'VERIFIED'].includes(c?.status) && (
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-4 border-t border-border mt-6 bg-slate-50 p-4 rounded-xl">
+          {['WAITING_APPROVAL', 'REGISTERED', 'APPROVED', 'VERIFIED'].includes(c?.status) && (
             <Button
               size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg gap-1.5 w-full sm:w-auto"
-              onClick={() => onStartExam(c.id)}
+              onClick={() => {
+                if (confirm(`Start exam for ${c?.fullName}? This will automatically launch their session.`)) {
+                  onStartExam(c.id);
+                }
+              }}
               disabled={isStartExamPending}
             >
               <Play className="size-3.5 fill-current animate-pulse" />
-              Launch Exam / Start Assessment
+              Start Exam
             </Button>
           )}
           {['COMPLETED', 'DISQUALIFIED', 'ABSENT', 'REJECTED', 'SUBMITTED'].includes(c?.status) && (
@@ -640,17 +626,37 @@ function CandidateDetailsContent({
               variant="outline"
               className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700 font-medium text-xs rounded-lg gap-1.5 w-full sm:w-auto"
               onClick={() => {
-                const reason = prompt(`Enter reason for granting ${c?.fullName} a re-attempt:`);
-                if (reason !== null) {
-                  onReset(session.id, reason || 'Granted by admin');
+                if (confirm(`Are you sure you want to allow a second attempt for ${c?.fullName}? This will permanently reset their answers, results, warnings, and timer.`)) {
+                  const reason = prompt(`Please enter the reason for granting a second attempt (required):`);
+                  if (reason !== null) {
+                    if (reason.trim() === '') {
+                      toast.error('A reason must be provided to grant a second attempt.');
+                    } else {
+                      onReset(session.id, reason.trim());
+                    }
+                  }
                 }
               }}
               disabled={isResetPending || (session.attemptNumber >= 2)}
             >
               <RefreshCw className="size-3.5" />
-              {session.attemptNumber >= 2 ? 'Reattempt Limit Reached (2/2)' : 'Allow Reattempt'}
+              {session.attemptNumber >= 2 ? 'Reattempt Limit Reached (2/2)' : 'Allow Second Attempt'}
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="destructive"
+            className="font-medium text-xs rounded-lg gap-1.5 w-full sm:w-auto"
+            onClick={() => {
+              if (confirm(`Are you sure you want to delete candidate ${c?.fullName}? This will permanently remove their profile, session, answers, results, warnings, and audit logs.`)) {
+                onDelete(c.id);
+              }
+            }}
+            disabled={isDeletePending}
+          >
+            <XCircle className="size-3.5" />
+            Delete Candidate
+          </Button>
         </div>
       )}
     </div>
